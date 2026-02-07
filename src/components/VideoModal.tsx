@@ -1,13 +1,21 @@
 import { VideoPlayer } from "./VideoPlayer";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 
+interface SubtitleTrack {
+  label: string;
+  src: string;
+  language: string;
+}
+
 interface VideoModalProps {
   isOpen: boolean;
   onClose: () => void;
   video: {
+    id?: string;
     title: string;
     videoUrl: string;
     thumbnail: string;
+    subtitles?: SubtitleTrack[];
   } | null;
 }
 
@@ -21,6 +29,8 @@ export const VideoModal = ({ isOpen, onClose, video }: VideoModalProps) => {
           src={video.videoUrl}
           title={video.title}
           thumbnail={video.thumbnail}
+          videoId={video.id}
+          subtitles={video.subtitles}
           onClose={onClose}
         />
       </DialogContent>
