@@ -1,11 +1,16 @@
 import { useState } from "react";
-import { Link2, Loader2, Download, X, CheckCircle2, AlertCircle, Youtube, Plus, FileVideo, FileImage, FileText, File } from "lucide-react";
+import { Link2, Loader2, Download, X, CheckCircle2, AlertCircle, Youtube, Plus, FileVideo, FileImage, FileText, File, Play } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Progress } from "@/components/ui/progress";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
+import { VideoPlayer } from "./VideoPlayer";
+import {
+  Dialog,
+  DialogContent,
+} from "@/components/ui/dialog";
 
 interface UrlUploadProps {
   onFileDownloaded: (file: File) => Promise<void>;
@@ -20,6 +25,7 @@ interface DownloadState {
   fileName: string;
   error?: string;
   type: "direct" | "youtube" | "vimeo";
+  isVideo?: boolean;
 }
 
 export const UrlUpload = ({ onFileDownloaded, disabled }: UrlUploadProps) => {
@@ -28,7 +34,14 @@ export const UrlUpload = ({ onFileDownloaded, disabled }: UrlUploadProps) => {
   const [isProcessing, setIsProcessing] = useState(false);
   const [showMultiInput, setShowMultiInput] = useState(false);
   const [multiUrlInput, setMultiUrlInput] = useState("");
+  const [streamingUrl, setStreamingUrl] = useState<{ url: string; title: string } | null>(null);
 
+  const VIDEO_EXTENSIONS = ["mp4", "webm", "mov", "avi", "mkv", "m4v", "flv", "wmv", "ts", "m3u8"];
+
+  const isVideoUrl = (fileName: string): boolean => {
+    const ext = fileName.split(".").pop()?.toLowerCase() || "";
+    return VIDEO_EXTENSIONS.includes(ext);
+  };
   const extractFileName = (url: string): string => {
     try {
       const urlObj = new URL(url);
@@ -278,6 +291,7 @@ export const UrlUpload = ({ onFileDownloaded, disabled }: UrlUploadProps) => {
     }
 
     const fileName = extractFileName(finalUrl);
+    const isVideo = isVideoUrl(fileName);
 
     setDownloads(prev => [...prev, {
       id,
@@ -286,7 +300,19 @@ export const UrlUpload = ({ onFileDownloaded, disabled }: UrlUploadProps) => {
       progress: 0,
       fileName,
       type,
+      isVideo,
     }]);
+
+    // If it's a video, don't auto-download - let user choose to stream or download
+    if (isVideo) {
+      setDownloads(prev => prev.map(d => 
+        d.id === id ? { ...d, status: "complete", progress: 100 } : d
+      ));
+      toast.success(`זוהה קישור וידאו: "${fileName}"`, {
+        description: "אפשר לצפות ישירות או להוריד לאחסון",
+      });
+      return;
+    }
 
     const file = await downloadDirectUrl(id, finalUrl);
 
@@ -346,7 +372,23 @@ export const UrlUpload = ({ onFileDownloaded, disabled }: UrlUploadProps) => {
     await processUrl(download.url);
   };
 
+  const handleDownloadVideo = async (download: DownloadState) => {
+    const file = await downloadDirectUrl(download.id, download.url);
+    if (file) {
+      await onFileDownloaded(file);
+      toast.success(`הקובץ "${file.name}" נוסף בהצלחה`);
+    }
+  };
+
+  const handleStreamVideo = (download: DownloadState) => {
+    setStreamingUrl({ 
+      url: download.url, 
+      title: download.fileName 
+    });
+  };
+
   return (
+    <>
     <div className="rounded-xl bg-card border border-border p-4 space-y-4">
       <div className="flex items-center justify-between mb-2">
         <div className="flex items-center gap-2">
@@ -466,6 +508,27 @@ export const UrlUpload = ({ onFileDownloaded, disabled }: UrlUploadProps) => {
                 {download.status === "downloading" && (
                   <span className="text-xs text-muted-foreground">{download.progress}%</span>
                 )}
+                {download.status === "complete" && download.isVideo && (
+                  <>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => handleStreamVideo(download)}
+                      className="text-primary"
+                    >
+                      <Play className="w-4 h-4 ml-1" />
+                      צפה
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => handleDownloadVideo(download)}
+                    >
+                      <Download className="w-4 h-4 ml-1" />
+                      הורד
+                    </Button>
+                  </>
+                )}
                 {download.status === "error" && (
                   <Button
                     variant="ghost"
@@ -489,5 +552,19 @@ export const UrlUpload = ({ onFileDownloaded, disabled }: UrlUploadProps) => {
         </div>
       )}
     </div>
+
+    {/* Video Streaming Dialog */}
+    <Dialog open={!!streamingUrl} onOpenChange={() => setStreamingUrl(null)}>
+      <DialogContent className="max-w-5xl p-0 bg-black border-none">
+        {streamingUrl && (
+          <VideoPlayer
+            src={streamingUrl.url}
+            title={streamingUrl.title}
+            onClose={() => setStreamingUrl(null)}
+          />
+        )}
+      </DialogContent>
+    </Dialog>
+    </>
   );
 };
