@@ -37,7 +37,9 @@ import {
   Loader2,
   FolderOpen,
   FolderInput,
-  CheckCircle2
+  CheckCircle2,
+  Move,
+  Home
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -103,6 +105,12 @@ const MyVideos = () => {
   const [draggingOverFolder, setDraggingOverFolder] = useState<string | null>(null);
   const [uploadingFiles, setUploadingFiles] = useState<UploadingFile[]>([]);
   const [showUploadProgress, setShowUploadProgress] = useState(false);
+  
+  // Video drag state
+  const [draggingVideoId, setDraggingVideoId] = useState<string | null>(null);
+  const [showMoveDialog, setShowMoveDialog] = useState(false);
+  const [videoToMove, setVideoToMove] = useState<VideoItem | null>(null);
+  const [allFolders, setAllFolders] = useState<FolderItem[]>([]);
 
   useEffect(() => {
     if (!authLoading && !user) {
@@ -113,6 +121,7 @@ const MyVideos = () => {
   useEffect(() => {
     if (user) {
       fetchContent();
+      fetchAllFolders();
     }
   }, [user, currentFolderId]);
 
@@ -169,7 +178,72 @@ const MyVideos = () => {
     }
   };
 
-  // Drag and drop handlers
+  // Fetch all folders for move dialog
+  const fetchAllFolders = async () => {
+    if (!user) return;
+    
+    const { data, error } = await supabase
+      .from("folders")
+      .select("*")
+      .eq("user_id", user.id)
+      .order("name");
+    
+    if (!error && data) {
+      setAllFolders(data);
+    }
+  };
+
+  // Move video to folder
+  const moveVideoToFolder = async (videoId: string, folderId: string | null) => {
+    try {
+      const { error } = await supabase
+        .from("videos")
+        .update({ folder_id: folderId })
+        .eq("id", videoId);
+
+      if (error) throw error;
+      
+      toast.success(folderId ? "הסרטון הועבר לתיקייה" : "הסרטון הועבר לתיקייה הראשית");
+      setShowMoveDialog(false);
+      setVideoToMove(null);
+      setDraggingVideoId(null);
+      fetchContent();
+    } catch (error) {
+      console.error("Error moving video:", error);
+      toast.error("שגיאה בהעברת הסרטון");
+    }
+  };
+
+  // Handle video drag start
+  const handleVideoDragStart = (e: React.DragEvent, video: VideoItem) => {
+    setDraggingVideoId(video.id);
+    e.dataTransfer.setData("video-id", video.id);
+    e.dataTransfer.effectAllowed = "move";
+  };
+
+  // Handle video drag end
+  const handleVideoDragEnd = () => {
+    setDraggingVideoId(null);
+    setDraggingOverFolder(null);
+  };
+
+  // Enhanced folder drop handler
+  const handleFolderDropWithVideos = async (e: React.DragEvent, targetFolderId: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDraggingOverFolder(null);
+
+    // Check if dragging a video
+    const videoId = e.dataTransfer.getData("video-id");
+    if (videoId) {
+      await moveVideoToFolder(videoId, targetFolderId);
+      return;
+    }
+
+    // Otherwise handle file upload (existing logic)
+    handleFolderDrop(e, targetFolderId);
+  };
+
   const traverseFileTree = (entry: FileSystemEntry, basePath: string): Promise<{ file: File; path: string }[]> => {
     return new Promise((resolve) => {
       if (entry.isFile) {
@@ -628,7 +702,7 @@ const MyVideos = () => {
                   <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
                     <Folder className="w-5 h-5 text-primary" />
                     תיקיות ({filteredFolders.length})
-                    <span className="text-xs text-muted-foreground font-normal">• גרור קבצים לתיקייה להעלאה</span>
+                    <span className="text-xs text-muted-foreground font-normal">• גרור קבצים או סרטונים לתיקייה</span>
                   </h2>
                   <div className={`grid gap-4 ${viewMode === "grid" ? 'grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6' : 'grid-cols-1'}`}>
                     {filteredFolders.map((folder) => (
@@ -642,7 +716,7 @@ const MyVideos = () => {
                         onClick={() => setCurrentFolderId(folder.id)}
                         onDragOver={(e) => handleFolderDragOver(e, folder.id)}
                         onDragLeave={handleFolderDragLeave}
-                        onDrop={(e) => handleFolderDrop(e, folder.id)}
+                        onDrop={(e) => handleFolderDropWithVideos(e, folder.id)}
                       >
                         <div className="flex items-center gap-3">
                           <div 
@@ -656,7 +730,9 @@ const MyVideos = () => {
                           <div className="flex-1 min-w-0">
                             <p className="font-medium truncate">{folder.name}</p>
                             <p className="text-sm text-muted-foreground">
-                              {draggingOverFolder === folder.id ? "שחרר להעלאה" : formatDate(folder.created_at)}
+                              {draggingOverFolder === folder.id 
+                                ? (draggingVideoId ? "שחרר להעברת הסרטון" : "שחרר להעלאה") 
+                                : formatDate(folder.created_at)}
                             </p>
                           </div>
                         </div>
@@ -728,7 +804,15 @@ const MyVideos = () => {
                 ) : (
                   <div className={`grid gap-6 ${viewMode === "grid" ? 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3' : 'grid-cols-1'}`}>
                     {filteredVideos.map((video) => (
-                      <div key={video.id} className="group relative">
+                      <div 
+                        key={video.id} 
+                        className={`group relative cursor-grab active:cursor-grabbing ${
+                          draggingVideoId === video.id ? 'opacity-50 scale-95' : ''
+                        }`}
+                        draggable
+                        onDragStart={(e) => handleVideoDragStart(e, video)}
+                        onDragEnd={handleVideoDragEnd}
+                      >
                         <div onClick={() => setSelectedVideo(video)}>
                           <VideoCard
                             title={video.title}
@@ -752,6 +836,15 @@ const MyVideos = () => {
                             </Button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
+                            <DropdownMenuItem 
+                              onClick={() => {
+                                setVideoToMove(video);
+                                setShowMoveDialog(true);
+                              }}
+                            >
+                              <Move className="w-4 h-4 ml-2" />
+                              העבר לתיקיה
+                            </DropdownMenuItem>
                             <DropdownMenuItem 
                               className="text-destructive"
                               onClick={() => {
@@ -855,6 +948,84 @@ const MyVideos = () => {
             </Button>
             <Button variant="destructive" onClick={deleteItem}>
               מחק
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Move Video Dialog */}
+      <Dialog open={showMoveDialog} onOpenChange={setShowMoveDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Move className="w-5 h-5 text-primary" />
+              העבר סרטון לתיקיה
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-2">
+            <p className="text-sm text-muted-foreground mb-4">
+              בחר תיקיה עבור: <span className="font-medium text-foreground">{videoToMove?.title}</span>
+            </p>
+            
+            {/* Root folder option */}
+            <button
+              className={`w-full p-3 rounded-lg flex items-center gap-3 transition-colors ${
+                !videoToMove?.folder_id 
+                  ? 'bg-primary/10 border border-primary' 
+                  : 'bg-secondary hover:bg-secondary/80'
+              }`}
+              onClick={() => moveVideoToFolder(videoToMove?.id || '', null)}
+            >
+              <div className="w-10 h-10 rounded-lg bg-muted flex items-center justify-center">
+                <Home className="w-5 h-5 text-muted-foreground" />
+              </div>
+              <div className="flex-1 text-right">
+                <p className="font-medium">תיקייה ראשית</p>
+                <p className="text-sm text-muted-foreground">שורש הספריה</p>
+              </div>
+            </button>
+
+            {/* Folder list */}
+            <div className="max-h-64 overflow-y-auto space-y-2">
+              {allFolders.map((folder) => (
+                <button
+                  key={folder.id}
+                  className={`w-full p-3 rounded-lg flex items-center gap-3 transition-colors ${
+                    videoToMove?.folder_id === folder.id 
+                      ? 'bg-primary/10 border border-primary' 
+                      : 'bg-secondary hover:bg-secondary/80'
+                  }`}
+                  onClick={() => moveVideoToFolder(videoToMove?.id || '', folder.id)}
+                  disabled={videoToMove?.folder_id === folder.id}
+                >
+                  <div 
+                    className="w-10 h-10 rounded-lg flex items-center justify-center"
+                    style={{ backgroundColor: `${folder.color}20` }}
+                  >
+                    <FolderOpen className="w-5 h-5" style={{ color: folder.color || "#3b82f6" }} />
+                  </div>
+                  <div className="flex-1 text-right">
+                    <p className="font-medium">{folder.name}</p>
+                    {folder.parent_id && (
+                      <p className="text-sm text-muted-foreground">תיקיית משנה</p>
+                    )}
+                  </div>
+                  {videoToMove?.folder_id === folder.id && (
+                    <span className="text-xs text-primary">נמצא כאן</span>
+                  )}
+                </button>
+              ))}
+            </div>
+
+            {allFolders.length === 0 && (
+              <p className="text-center text-muted-foreground py-4">
+                אין תיקיות. צור תיקייה חדשה כדי לארגן את הסרטונים.
+              </p>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setShowMoveDialog(false)}>
+              ביטול
             </Button>
           </DialogFooter>
         </DialogContent>
