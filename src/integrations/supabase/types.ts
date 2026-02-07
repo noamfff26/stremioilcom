@@ -14,6 +14,44 @@ export type Database = {
   }
   public: {
     Tables: {
+      folders: {
+        Row: {
+          color: string | null
+          created_at: string
+          id: string
+          name: string
+          parent_id: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          color?: string | null
+          created_at?: string
+          id?: string
+          name: string
+          parent_id?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          color?: string | null
+          created_at?: string
+          id?: string
+          name?: string
+          parent_id?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "folders_parent_id_fkey"
+            columns: ["parent_id"]
+            isOneToOne: false
+            referencedRelation: "folders"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       profiles: {
         Row: {
           avatar_url: string | null
@@ -47,6 +85,7 @@ export type Database = {
           created_at: string
           description: string | null
           duration_seconds: number | null
+          folder_id: string | null
           id: string
           sharepoint_path: string | null
           thumbnail_url: string | null
@@ -61,6 +100,7 @@ export type Database = {
           created_at?: string
           description?: string | null
           duration_seconds?: number | null
+          folder_id?: string | null
           id?: string
           sharepoint_path?: string | null
           thumbnail_url?: string | null
@@ -75,6 +115,7 @@ export type Database = {
           created_at?: string
           description?: string | null
           duration_seconds?: number | null
+          folder_id?: string | null
           id?: string
           sharepoint_path?: string | null
           thumbnail_url?: string | null
@@ -84,7 +125,15 @@ export type Database = {
           video_url?: string | null
           views_count?: number | null
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "videos_folder_id_fkey"
+            columns: ["folder_id"]
+            isOneToOne: false
+            referencedRelation: "folders"
+            referencedColumns: ["id"]
+          },
+        ]
       }
     }
     Views: {
