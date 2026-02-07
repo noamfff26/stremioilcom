@@ -26,7 +26,7 @@ export const Header = () => {
             <div className="w-10 h-10 rounded-xl gradient-primary flex items-center justify-center glow-primary">
               <Play className="w-5 h-5 text-primary-foreground fill-current" />
             </div>
-            <span className="text-xl font-bold text-foreground">StreamHub</span>
+            <span className="text-xl font-bold text-foreground">הענן שלי</span>
           </div>
 
           {/* Desktop Navigation */}
