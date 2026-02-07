@@ -1,4 +1,4 @@
-import { Upload, Menu, LogIn, LogOut, User, FolderOpen } from "lucide-react";
+import { Upload, Menu, LogIn, LogOut, User, FolderOpen, UserCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
@@ -61,12 +61,15 @@ export const Header = () => {
                   <FolderOpen className="w-4 h-4" />
                   הסרטונים שלי
                 </Button>
-                <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-secondary">
-                  <User className="w-4 h-4 text-primary" />
+                <button 
+                  onClick={() => navigate("/profile")}
+                  className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-secondary hover:bg-secondary/80 transition-colors"
+                >
+                  <UserCircle className="w-4 h-4 text-primary" />
                   <span className="text-sm text-muted-foreground">
                     {user.email?.split("@")[0]}
                   </span>
-                </div>
+                </button>
                 <Button variant="ghost" size="sm" onClick={handleSignOut}>
                   <LogOut className="w-4 h-4" />
                   התנתק
@@ -124,10 +127,13 @@ export const Header = () => {
               <div className="flex flex-col gap-2 pt-4">
                 {user ? (
                   <>
-                    <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-secondary">
-                      <User className="w-4 h-4 text-primary" />
+                    <button 
+                      onClick={() => { navigate("/profile"); setIsMobileMenuOpen(false); }}
+                      className="flex items-center gap-2 px-3 py-2 rounded-lg bg-secondary"
+                    >
+                      <UserCircle className="w-4 h-4 text-primary" />
                       <span className="text-sm">{user.email?.split("@")[0]}</span>
-                    </div>
+                    </button>
                     <Button variant="glass" size="sm" onClick={() => { navigate("/my-videos"); setIsMobileMenuOpen(false); }}>
                       <FolderOpen className="w-4 h-4" />
                       הסרטונים שלי
