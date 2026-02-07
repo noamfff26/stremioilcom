@@ -1,86 +1,93 @@
 import { VideoCard } from "./VideoCard";
-import { Search, Filter, Grid, List, Calendar } from "lucide-react";
+import { Search, Filter, Grid, List, Calendar, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { FilterPanel, FilterState } from "./FilterPanel";
 import { VideoModal } from "./VideoModal";
+import { supabase } from "@/integrations/supabase/client";
+
+interface Video {
+  id: string;
+  title: string;
+  thumbnail_url: string | null;
+  video_url: string | null;
+  duration_seconds: number;
+  views_count: number;
+  category: string;
+  created_at: string;
+  user_id: string;
+}
 
 const mockVideos = [
   {
-    id: 1,
+    id: "mock-1",
     title: "מדריך שימוש במערכת החדשה - חלק ראשון",
-    thumbnail: "https://images.unsplash.com/photo-1611162617474-5b21e879e113?w=600&h=340&fit=crop",
-    duration: "12:45",
-    durationSeconds: 765,
-    views: "1.2K",
-    date: "לפני 2 ימים",
-    createdAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000),
+    thumbnail_url: "https://images.unsplash.com/photo-1611162617474-5b21e879e113?w=600&h=340&fit=crop",
+    video_url: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4",
+    duration_seconds: 765,
+    views_count: 1200,
     category: "הדרכה",
-    videoUrl: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4"
+    created_at: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
+    user_id: "demo"
   },
   {
-    id: 2,
+    id: "mock-2",
     title: "סיכום ישיבת צוות שבועית",
-    thumbnail: "https://images.unsplash.com/photo-1552664730-d307ca884978?w=600&h=340&fit=crop",
-    duration: "45:30",
-    durationSeconds: 2730,
-    views: "856",
-    date: "לפני 3 ימים",
-    createdAt: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000),
+    thumbnail_url: "https://images.unsplash.com/photo-1552664730-d307ca884978?w=600&h=340&fit=crop",
+    video_url: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4",
+    duration_seconds: 2730,
+    views_count: 856,
     category: "ישיבות",
-    videoUrl: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4"
+    created_at: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString(),
+    user_id: "demo"
   },
   {
-    id: 3,
+    id: "mock-3",
     title: "הדגמת מוצר חדש ללקוחות",
-    thumbnail: "https://images.unsplash.com/photo-1460925895917-afdab827c52f?w=600&h=340&fit=crop",
-    duration: "08:20",
-    durationSeconds: 500,
-    views: "2.1K",
-    date: "לפני שבוע",
-    createdAt: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000),
+    thumbnail_url: "https://images.unsplash.com/photo-1460925895917-afdab827c52f?w=600&h=340&fit=crop",
+    video_url: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4",
+    duration_seconds: 500,
+    views_count: 2100,
     category: "מוצר",
-    videoUrl: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4"
+    created_at: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString(),
+    user_id: "demo"
   },
   {
-    id: 4,
+    id: "mock-4",
     title: "וובינר: טרנדים בתעשייה 2024",
-    thumbnail: "https://images.unsplash.com/photo-1540575467063-178a50c2df87?w=600&h=340&fit=crop",
-    duration: "1:02:15",
-    durationSeconds: 3735,
-    views: "3.4K",
-    date: "לפני שבוע",
-    createdAt: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000),
+    thumbnail_url: "https://images.unsplash.com/photo-1540575467063-178a50c2df87?w=600&h=340&fit=crop",
+    video_url: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4",
+    duration_seconds: 3735,
+    views_count: 3400,
     category: "וובינר",
-    videoUrl: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4"
+    created_at: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString(),
+    user_id: "demo"
   },
   {
-    id: 5,
+    id: "mock-5",
     title: "הכשרת עובדים חדשים - מודול 1",
-    thumbnail: "https://images.unsplash.com/photo-1531482615713-2afd69097998?w=600&h=340&fit=crop",
-    duration: "25:00",
-    durationSeconds: 1500,
-    views: "945",
-    date: "לפני 2 שבועות",
-    createdAt: new Date(Date.now() - 14 * 24 * 60 * 60 * 1000),
+    thumbnail_url: "https://images.unsplash.com/photo-1531482615713-2afd69097998?w=600&h=340&fit=crop",
+    video_url: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerFun.mp4",
+    duration_seconds: 1500,
+    views_count: 945,
     category: "הדרכה",
-    videoUrl: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerFun.mp4"
+    created_at: new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString(),
+    user_id: "demo"
   },
   {
-    id: 6,
+    id: "mock-6",
     title: "סקירה רבעונית Q4",
-    thumbnail: "https://images.unsplash.com/photo-1551288049-bebda4e38f71?w=600&h=340&fit=crop",
-    duration: "35:10",
-    durationSeconds: 2110,
-    views: "1.8K",
-    date: "לפני 2 שבועות",
-    createdAt: new Date(Date.now() - 14 * 24 * 60 * 60 * 1000),
+    thumbnail_url: "https://images.unsplash.com/photo-1551288049-bebda4e38f71?w=600&h=340&fit=crop",
+    video_url: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyrides.mp4",
+    duration_seconds: 2110,
+    views_count: 1800,
     category: "דוחות",
-    videoUrl: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyrides.mp4"
+    created_at: new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString(),
+    user_id: "demo"
   }
 ];
 
-const categories = ["הכל", "הדרכה", "ישיבות", "מוצר", "וובינר", "דוחות"];
+const categories = ["הכל", "הדרכה", "ישיבות", "מוצר", "וובינר", "דוחות", "כללי"];
 
 export const VideoLibrary = () => {
   const [activeCategory, setActiveCategory] = useState("הכל");
@@ -93,9 +100,69 @@ export const VideoLibrary = () => {
     minDuration: 0,
     maxDuration: 7200,
   });
-  const [selectedVideo, setSelectedVideo] = useState<typeof mockVideos[0] | null>(null);
+  const [selectedVideo, setSelectedVideo] = useState<Video | null>(null);
+  const [videos, setVideos] = useState<Video[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
 
-  const filteredVideos = mockVideos.filter((video) => {
+  useEffect(() => {
+    fetchVideos();
+  }, []);
+
+  const fetchVideos = async () => {
+    setIsLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from("videos")
+        .select("*")
+        .order("created_at", { ascending: false });
+
+      if (error) {
+        console.error("Error fetching videos:", error);
+        setVideos(mockVideos);
+      } else {
+        // Combine real videos with mock videos for demo
+        setVideos(data.length > 0 ? data : mockVideos);
+      }
+    } catch (error) {
+      console.error("Error:", error);
+      setVideos(mockVideos);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const formatDuration = (seconds: number): string => {
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    const secs = seconds % 60;
+
+    if (hours > 0) {
+      return `${hours}:${minutes.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
+    }
+    return `${minutes}:${secs.toString().padStart(2, "0")}`;
+  };
+
+  const formatViews = (views: number): string => {
+    if (views >= 1000) {
+      return `${(views / 1000).toFixed(1)}K`;
+    }
+    return views.toString();
+  };
+
+  const formatDate = (dateString: string): string => {
+    const date = new Date(dateString);
+    const now = new Date();
+    const diffDays = Math.floor((now.getTime() - date.getTime()) / (1000 * 60 * 60 * 24));
+
+    if (diffDays === 0) return "היום";
+    if (diffDays === 1) return "אתמול";
+    if (diffDays < 7) return `לפני ${diffDays} ימים`;
+    if (diffDays < 14) return "לפני שבוע";
+    if (diffDays < 30) return `לפני ${Math.floor(diffDays / 7)} שבועות`;
+    return `לפני ${Math.floor(diffDays / 30)} חודשים`;
+  };
+
+  const filteredVideos = videos.filter((video) => {
     // Category filter
     if (activeCategory !== "הכל" && video.category !== activeCategory) return false;
 
@@ -103,12 +170,13 @@ export const VideoLibrary = () => {
     if (searchQuery && !video.title.toLowerCase().includes(searchQuery.toLowerCase())) return false;
 
     // Date filters
-    if (filters.dateFrom && video.createdAt < filters.dateFrom) return false;
-    if (filters.dateTo && video.createdAt > filters.dateTo) return false;
+    const videoDate = new Date(video.created_at);
+    if (filters.dateFrom && videoDate < filters.dateFrom) return false;
+    if (filters.dateTo && videoDate > filters.dateTo) return false;
 
     // Duration filter
-    if (video.durationSeconds < filters.minDuration) return false;
-    if (video.durationSeconds > filters.maxDuration) return false;
+    if (video.duration_seconds < filters.minDuration) return false;
+    if (video.duration_seconds > filters.maxDuration) return false;
 
     return true;
   });
@@ -211,41 +279,50 @@ export const VideoLibrary = () => {
           נמצאו {filteredVideos.length} סרטונים
         </div>
 
-        {/* Video Grid */}
-        <div className={`grid gap-6 ${viewMode === "grid" ? 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3' : 'grid-cols-1'}`}>
-          {filteredVideos.map((video, index) => (
-            <div 
-              key={video.id} 
-              className="animate-fade-up cursor-pointer"
-              style={{ animationDelay: `${index * 0.1}s` }}
-              onClick={() => setSelectedVideo(video)}
-            >
-              <VideoCard 
-                title={video.title}
-                thumbnail={video.thumbnail}
-                duration={video.duration}
-                views={video.views}
-                date={video.date}
-                category={video.category}
-              />
+        {/* Loading State */}
+        {isLoading ? (
+          <div className="flex items-center justify-center py-20">
+            <Loader2 className="w-8 h-8 animate-spin text-primary" />
+          </div>
+        ) : (
+          <>
+            {/* Video Grid */}
+            <div className={`grid gap-6 ${viewMode === "grid" ? 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3' : 'grid-cols-1'}`}>
+              {filteredVideos.map((video, index) => (
+                <div 
+                  key={video.id} 
+                  className="animate-fade-up cursor-pointer"
+                  style={{ animationDelay: `${index * 0.1}s` }}
+                  onClick={() => setSelectedVideo(video)}
+                >
+                  <VideoCard 
+                    title={video.title}
+                    thumbnail={video.thumbnail_url || "https://images.unsplash.com/photo-1611162617474-5b21e879e113?w=600&h=340&fit=crop"}
+                    duration={formatDuration(video.duration_seconds)}
+                    views={formatViews(video.views_count)}
+                    date={formatDate(video.created_at)}
+                    category={video.category}
+                  />
+                </div>
+              ))}
             </div>
-          ))}
-        </div>
 
-        {/* No Results */}
-        {filteredVideos.length === 0 && (
-          <div className="text-center py-12">
-            <p className="text-muted-foreground">לא נמצאו סרטונים התואמים לחיפוש</p>
-          </div>
-        )}
+            {/* No Results */}
+            {filteredVideos.length === 0 && (
+              <div className="text-center py-12">
+                <p className="text-muted-foreground">לא נמצאו סרטונים התואמים לחיפוש</p>
+              </div>
+            )}
 
-        {/* Load More */}
-        {filteredVideos.length > 0 && (
-          <div className="text-center mt-12">
-            <Button variant="glass" size="lg">
-              טען עוד סרטונים
-            </Button>
-          </div>
+            {/* Load More */}
+            {filteredVideos.length > 0 && (
+              <div className="text-center mt-12">
+                <Button variant="glass" size="lg" onClick={fetchVideos}>
+                  רענן סרטונים
+                </Button>
+              </div>
+            )}
+          </>
         )}
       </div>
 
@@ -255,8 +332,8 @@ export const VideoLibrary = () => {
         onClose={() => setSelectedVideo(null)}
         video={selectedVideo ? {
           title: selectedVideo.title,
-          videoUrl: selectedVideo.videoUrl,
-          thumbnail: selectedVideo.thumbnail,
+          videoUrl: selectedVideo.video_url || "",
+          thumbnail: selectedVideo.thumbnail_url || "",
         } : null}
       />
     </section>
