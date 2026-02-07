@@ -23,7 +23,7 @@ export const Footer = () => {
             <a href="#" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
               עזרה
             </a>
-            <a href="#" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
+            <a href="https://discord.gg/H4M5mufS" target="_blank" rel="noopener noreferrer" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
               צור קשר
             </a>
           </nav>
