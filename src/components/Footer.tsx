@@ -1,4 +1,5 @@
-import { Play, Github, Twitter, Linkedin } from "lucide-react";
+import { Github, Twitter, Linkedin } from "lucide-react";
+import logoImg from "@/assets/logo.jpg";
 
 export const Footer = () => {
   return (
@@ -7,10 +8,8 @@ export const Footer = () => {
         <div className="flex flex-col md:flex-row items-center justify-between gap-6">
           {/* Logo */}
           <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-lg gradient-primary flex items-center justify-center">
-              <Play className="w-4 h-4 text-primary-foreground fill-current" />
-            </div>
-            <span className="text-lg font-bold text-foreground">StreamHub</span>
+            <img src={logoImg} alt="הענן שלי" className="w-8 h-8 rounded-lg object-cover" />
+            <span className="text-lg font-bold text-foreground">הענן שלי</span>
           </div>
 
           {/* Links */}
@@ -45,8 +44,8 @@ export const Footer = () => {
 
         {/* Copyright */}
         <div className="text-center mt-8 pt-8 border-t border-border">
-          <p className="text-sm text-muted-foreground">
-            © 2024 StreamHub. כל הזכויות שמורות.
+        <p className="text-sm text-muted-foreground">
+            © 2026 הענן שלי. כל הזכויות שמורות.
           </p>
         </div>
       </div>
