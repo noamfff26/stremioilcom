@@ -5,6 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Progress } from "@/components/ui/progress";
 import { toast } from "sonner";
+import { supabase } from "@/integrations/supabase/client";
 
 interface UrlUploadProps {
   onFileDownloaded: (file: File) => Promise<void>;
@@ -119,6 +120,50 @@ export const UrlUpload = ({ onFileDownloaded, disabled }: UrlUploadProps) => {
     return <File className="w-4 h-4 text-muted-foreground" />;
   };
 
+  // Download via proxy (for CORS-restricted URLs)
+  const downloadViaProxy = async (id: string, url: string): Promise<File | null> => {
+    const fileName = extractFileName(url);
+    
+    try {
+      setDownloads(prev => prev.map(d => 
+        d.id === id ? { ...d, status: "downloading", progress: 10 } : d
+      ));
+
+      const { data, error } = await supabase.functions.invoke('proxy-download', {
+        body: { url },
+      });
+
+      if (error) {
+        throw new Error(error.message || 'שגיאה בהורדה דרך הפרוקסי');
+      }
+
+      // The response is the file blob
+      const blob = data as Blob;
+      
+      setDownloads(prev => prev.map(d => 
+        d.id === id ? { ...d, progress: 90 } : d
+      ));
+
+      const mimeType = getMimeType(fileName);
+      const file = Object.assign(new Blob([blob], { type: mimeType }), { 
+        name: fileName, 
+        lastModified: Date.now() 
+      }) as unknown as File;
+
+      setDownloads(prev => prev.map(d => 
+        d.id === id ? { ...d, status: "complete", progress: 100 } : d
+      ));
+
+      return file;
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : "שגיאה בהורדה";
+      setDownloads(prev => prev.map(d => 
+        d.id === id ? { ...d, status: "error", error: errorMessage } : d
+      ));
+      return null;
+    }
+  };
+
   const downloadDirectUrl = async (id: string, url: string): Promise<File | null> => {
     const fileName = extractFileName(url);
     
@@ -127,10 +172,20 @@ export const UrlUpload = ({ onFileDownloaded, disabled }: UrlUploadProps) => {
         d.id === id ? { ...d, status: "downloading", progress: 5 } : d
       ));
 
-      const response = await fetch(url, { mode: "cors" });
-
-      if (!response.ok) {
-        throw new Error(`שגיאה בהורדה: ${response.status}`);
+      // Try direct fetch first
+      let response: Response;
+      try {
+        response = await fetch(url, { mode: "cors" });
+        if (!response.ok) {
+          throw new Error(`שגיאה: ${response.status}`);
+        }
+      } catch (corsError) {
+        // If CORS fails, try via proxy
+        console.log("Direct fetch failed, trying proxy...", corsError);
+        setDownloads(prev => prev.map(d => 
+          d.id === id ? { ...d, progress: 5, error: undefined } : d
+        ));
+        return await downloadViaProxy(id, url);
       }
 
       const contentLength = response.headers.get("content-length");
@@ -159,7 +214,10 @@ export const UrlUpload = ({ onFileDownloaded, disabled }: UrlUploadProps) => {
 
       const mimeType = getMimeType(fileName);
       const blob = new Blob(chunks, { type: mimeType });
-      const file = Object.assign(blob, { name: fileName, lastModified: Date.now() }) as File;
+      const file = Object.assign(blob, { 
+        name: fileName, 
+        lastModified: Date.now() 
+      }) as unknown as File;
 
       setDownloads(prev => prev.map(d => 
         d.id === id ? { ...d, status: "complete", progress: 100 } : d
