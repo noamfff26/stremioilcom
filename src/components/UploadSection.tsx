@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef } from "react";
-import { Upload, Cloud, Video, FileVideo, CheckCircle2, X, Loader2, AlertCircle } from "lucide-react";
+import { Upload, Cloud, Video, FileVideo, CheckCircle2, X, Loader2, AlertCircle, FolderOpen } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -32,6 +32,7 @@ export const UploadSection = () => {
   const [isUploading, setIsUploading] = useState(false);
   const [overallProgress, setOverallProgress] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const folderInputRef = useRef<HTMLInputElement>(null);
   
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -49,17 +50,67 @@ export const UploadSection = () => {
     e.preventDefault();
     setIsDragging(false);
     
-    const files = Array.from(e.dataTransfer.files).filter(file => 
-      file.type.startsWith("video/")
-    );
-    
-    if (files.length === 0) {
-      toast.error("יש לבחור קבצי וידאו בלבד");
-      return;
+    // Handle both files and folders via DataTransferItemList
+    const items = e.dataTransfer.items;
+    const filePromises: Promise<File[]>[] = [];
+
+    if (items) {
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        if (item.kind === "file") {
+          const entry = item.webkitGetAsEntry?.();
+          if (entry) {
+            filePromises.push(traverseFileTree(entry));
+          } else {
+            const file = item.getAsFile();
+            if (file && file.type.startsWith("video/")) {
+              filePromises.push(Promise.resolve([file]));
+            }
+          }
+        }
+      }
     }
-    
-    addFiles(files);
+
+    Promise.all(filePromises).then((fileArrays) => {
+      const allFiles = fileArrays.flat().filter(file => file.type.startsWith("video/"));
+      if (allFiles.length === 0) {
+        toast.error("יש לבחור קבצי וידאו בלבד");
+        return;
+      }
+      addFiles(allFiles);
+    });
   }, []);
+
+  // Recursively traverse folder entries
+  const traverseFileTree = (entry: FileSystemEntry): Promise<File[]> => {
+    return new Promise((resolve) => {
+      if (entry.isFile) {
+        (entry as FileSystemFileEntry).file((file) => {
+          resolve([file]);
+        }, () => resolve([]));
+      } else if (entry.isDirectory) {
+        const dirReader = (entry as FileSystemDirectoryEntry).createReader();
+        const allEntries: FileSystemEntry[] = [];
+        
+        const readEntries = () => {
+          dirReader.readEntries((entries) => {
+            if (entries.length === 0) {
+              Promise.all(allEntries.map(traverseFileTree)).then((results) => {
+                resolve(results.flat());
+              });
+            } else {
+              allEntries.push(...entries);
+              readEntries();
+            }
+          }, () => resolve([]));
+        };
+        
+        readEntries();
+      } else {
+        resolve([]);
+      }
+    });
+  };
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
@@ -73,6 +124,24 @@ export const UploadSection = () => {
     // Reset input
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
+    }
+  };
+
+  const handleFolderSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files) {
+      const files = Array.from(e.target.files).filter(file => 
+        file.type.startsWith("video/")
+      );
+      if (files.length > 0) {
+        addFiles(files);
+        toast.success(`נמצאו ${files.length} סרטונים בתיקייה`);
+      } else {
+        toast.error("לא נמצאו קבצי וידאו בתיקייה");
+      }
+    }
+    // Reset input
+    if (folderInputRef.current) {
+      folderInputRef.current.value = "";
     }
   };
 
@@ -424,27 +493,46 @@ export const UploadSection = () => {
                   או לחץ לבחירת קבצים מהמחשב
                 </p>
 
-                {/* Upload Button */}
-                <label>
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept="video/*"
-                    multiple
-                    onChange={handleFileSelect}
-                    className="hidden"
-                  />
-                  <Button variant="hero" size="lg" asChild>
-                    <span>
-                      <Upload className="w-5 h-5" />
-                      בחר קבצים להעלאה
-                    </span>
-                  </Button>
-                </label>
+                {/* Upload Buttons */}
+                <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
+                  <label>
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept="video/*"
+                      multiple
+                      onChange={handleFileSelect}
+                      className="hidden"
+                    />
+                    <Button variant="hero" size="lg" asChild>
+                      <span>
+                        <Upload className="w-5 h-5" />
+                        בחר קבצים
+                      </span>
+                    </Button>
+                  </label>
+                  
+                  <label>
+                    <input
+                      ref={folderInputRef}
+                      type="file"
+                      accept="video/*"
+                      onChange={handleFolderSelect}
+                      className="hidden"
+                      {...{ webkitdirectory: "", directory: "" } as React.InputHTMLAttributes<HTMLInputElement>}
+                    />
+                    <Button variant="glass" size="lg" asChild>
+                      <span>
+                        <FolderOpen className="w-5 h-5" />
+                        העלה תיקייה
+                      </span>
+                    </Button>
+                  </label>
+                </div>
 
                 {/* Supported Formats */}
                 <p className="text-sm text-muted-foreground mt-4">
-                  פורמטים נתמכים: MP4, MOV, AVI, WebM, MKV • ללא הגבלת גודל
+                  פורמטים נתמכים: MP4, MOV, AVI, WebM, MKV • ללא הגבלת גודל • גרור תיקייה להעלאה
                 </p>
               </div>
             </div>
