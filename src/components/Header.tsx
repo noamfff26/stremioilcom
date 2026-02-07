@@ -1,8 +1,9 @@
-import { Play, Upload, Menu, LogIn, LogOut, User, FolderOpen } from "lucide-react";
+import { Upload, Menu, LogIn, LogOut, User, FolderOpen } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useNavigate, useLocation } from "react-router-dom";
+import logoImg from "@/assets/logo.jpg";
 
 export const Header = () => {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -23,9 +24,7 @@ export const Header = () => {
         <div className="flex items-center justify-between h-16">
           {/* Logo */}
           <div className="flex items-center gap-2 cursor-pointer" onClick={() => navigate("/")}>
-            <div className="w-10 h-10 rounded-xl gradient-primary flex items-center justify-center glow-primary">
-              <Play className="w-5 h-5 text-primary-foreground fill-current" />
-            </div>
+            <img src={logoImg} alt="הענן שלי" className="w-10 h-10 rounded-xl object-cover" />
             <span className="text-xl font-bold text-foreground">הענן שלי</span>
           </div>
 
