@@ -329,9 +329,12 @@ export const VideoPlayer = ({
   return (
     <div
       ref={containerRef}
-      className="relative w-full aspect-video bg-black rounded-xl overflow-hidden group"
+      className={`relative w-full aspect-video bg-black rounded-xl overflow-hidden group ${
+        isPlaying && !showControls ? "cursor-none" : ""
+      }`}
       onMouseMove={resetControlsTimeout}
       onMouseEnter={() => setShowControls(true)}
+      onMouseLeave={() => isPlaying && setShowControls(false)}
     >
       <video
         ref={videoRef}
