@@ -1,8 +1,9 @@
-import { useState } from "react";
-import { X, Type, Palette, Move, Eye } from "lucide-react";
+import { useState, useEffect } from "react";
+import { X, Type, Palette, Move, Eye, Save, Star, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
 import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
@@ -11,6 +12,9 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/contexts/AuthContext";
+import { toast } from "sonner";
 
 export interface SubtitleConfig {
   fontSize: number;
@@ -23,6 +27,13 @@ export interface SubtitleConfig {
   position: "top" | "middle" | "bottom";
   isBold: boolean;
   isRTL: boolean;
+}
+
+interface SubtitleProfile {
+  id: string;
+  name: string;
+  config: SubtitleConfig;
+  is_default: boolean;
 }
 
 interface SubtitleTrack {
@@ -74,7 +85,114 @@ export const SubtitleSettings = ({
   onTrackChange,
   onClose,
 }: SubtitleSettingsProps) => {
-  const [activeTab, setActiveTab] = useState<"tracks" | "style">("tracks");
+  const { user } = useAuth();
+  const [activeTab, setActiveTab] = useState<"tracks" | "style" | "profiles">("tracks");
+  const [profiles, setProfiles] = useState<SubtitleProfile[]>([]);
+  const [newProfileName, setNewProfileName] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
+
+  // Fetch profiles on mount
+  useEffect(() => {
+    if (user) {
+      fetchProfiles();
+    }
+  }, [user]);
+
+  const fetchProfiles = async () => {
+    if (!user) return;
+    
+    const { data, error } = await supabase
+      .from("subtitle_profiles")
+      .select("*")
+      .eq("user_id", user.id)
+      .order("created_at", { ascending: false });
+    
+    if (error) {
+      console.error("Error fetching profiles:", error);
+      return;
+    }
+    
+    setProfiles(data.map(p => ({
+      id: p.id,
+      name: p.name,
+      config: p.config as unknown as SubtitleConfig,
+      is_default: p.is_default || false,
+    })));
+  };
+
+  const saveProfile = async () => {
+    if (!user) {
+      toast.error("יש להתחבר כדי לשמור פרופילים");
+      return;
+    }
+    
+    if (!newProfileName.trim()) {
+      toast.error("יש להזין שם לפרופיל");
+      return;
+    }
+    
+    setIsLoading(true);
+    
+    const { error } = await supabase
+      .from("subtitle_profiles")
+      .insert([{
+        user_id: user.id,
+        name: newProfileName.trim(),
+        config: JSON.parse(JSON.stringify(config)),
+        is_default: false,
+      }]);
+    
+    setIsLoading(false);
+    
+    if (error) {
+      toast.error("שגיאה בשמירת הפרופיל");
+      console.error(error);
+      return;
+    }
+    
+    toast.success("הפרופיל נשמר בהצלחה");
+    setNewProfileName("");
+    fetchProfiles();
+  };
+
+  const loadProfile = (profile: SubtitleProfile) => {
+    onChange(profile.config);
+    toast.success(`נטען פרופיל: ${profile.name}`);
+  };
+
+  const setDefaultProfile = async (profileId: string) => {
+    if (!user) return;
+    
+    // First, unset all defaults
+    await supabase
+      .from("subtitle_profiles")
+      .update({ is_default: false })
+      .eq("user_id", user.id);
+    
+    // Set the new default
+    await supabase
+      .from("subtitle_profiles")
+      .update({ is_default: true })
+      .eq("id", profileId);
+    
+    toast.success("הפרופיל הוגדר כברירת מחדל");
+    fetchProfiles();
+  };
+
+  const deleteProfile = async (profileId: string) => {
+    const { error } = await supabase
+      .from("subtitle_profiles")
+      .delete()
+      .eq("id", profileId);
+    
+    if (error) {
+      toast.error("שגיאה במחיקת הפרופיל");
+      return;
+    }
+    
+    toast.success("הפרופיל נמחק");
+    fetchProfiles();
+  };
 
   const updateConfig = (updates: Partial<SubtitleConfig>) => {
     onChange({ ...config, ...updates });
@@ -102,7 +220,7 @@ export const SubtitleSettings = ({
           }`}
           onClick={() => setActiveTab("tracks")}
         >
-          בחירת כתוביות
+          כתוביות
         </button>
         <button
           className={`flex-1 p-2 text-sm font-medium transition-colors ${
@@ -111,6 +229,14 @@ export const SubtitleSettings = ({
           onClick={() => setActiveTab("style")}
         >
           עיצוב
+        </button>
+        <button
+          className={`flex-1 p-2 text-sm font-medium transition-colors ${
+            activeTab === "profiles" ? "text-primary border-b-2 border-primary" : "text-muted-foreground"
+          }`}
+          onClick={() => setActiveTab("profiles")}
+        >
+          פרופילים
         </button>
       </div>
 
@@ -146,7 +272,7 @@ export const SubtitleSettings = ({
               </p>
             )}
           </div>
-        ) : (
+        ) : activeTab === "style" ? (
           /* Style Settings */
           <div className="space-y-5">
             {/* Font Size */}
@@ -330,6 +456,82 @@ export const SubtitleSettings = ({
               >
                 זוהי תצוגה מקדימה של הכתוביות
               </p>
+            </div>
+          </div>
+        ) : (
+          /* Profiles Tab */
+          <div className="space-y-4">
+            {/* Save New Profile */}
+            <div className="space-y-2">
+              <Label>שמור פרופיל חדש</Label>
+              <div className="flex gap-2">
+                <Input
+                  placeholder="שם הפרופיל..."
+                  value={newProfileName}
+                  onChange={(e) => setNewProfileName(e.target.value)}
+                  className="bg-secondary"
+                />
+                <Button 
+                  size="icon" 
+                  onClick={saveProfile}
+                  disabled={isLoading || !newProfileName.trim()}
+                >
+                  <Save className="w-4 h-4" />
+                </Button>
+              </div>
+            </div>
+
+            {/* Saved Profiles */}
+            <div className="space-y-2">
+              <Label>פרופילים שמורים</Label>
+              {!user ? (
+                <p className="text-sm text-muted-foreground text-center py-4">
+                  יש להתחבר כדי לשמור ולטעון פרופילים
+                </p>
+              ) : profiles.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-4">
+                  אין פרופילים שמורים
+                </p>
+              ) : (
+                profiles.map((profile) => (
+                  <div
+                    key={profile.id}
+                    className="flex items-center justify-between p-3 rounded-lg bg-secondary hover:bg-secondary/80 transition-colors"
+                  >
+                    <button
+                      className="flex-1 text-right"
+                      onClick={() => loadProfile(profile)}
+                    >
+                      <span className="font-medium flex items-center gap-2">
+                        {profile.name}
+                        {profile.is_default && (
+                          <Star className="w-3 h-3 text-primary fill-primary" />
+                        )}
+                      </span>
+                    </button>
+                    <div className="flex items-center gap-1">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8"
+                        onClick={() => setDefaultProfile(profile.id)}
+                        title="הגדר כברירת מחדל"
+                      >
+                        <Star className={`w-4 h-4 ${profile.is_default ? "text-primary fill-primary" : ""}`} />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 text-destructive hover:text-destructive"
+                        onClick={() => deleteProfile(profile.id)}
+                        title="מחק פרופיל"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </Button>
+                    </div>
+                  </div>
+                ))
+              )}
             </div>
           </div>
         )}
