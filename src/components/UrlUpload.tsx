@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link2, Loader2, Download, X, CheckCircle2, AlertCircle, Youtube, Plus, FileVideo, FileImage, FileText, File, Play } from "lucide-react";
+import { Link2, Loader2, Download, X, CheckCircle2, AlertCircle, Youtube, Plus, FileVideo, FileImage, FileText, File, Play, ExternalLink, Copy } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -11,6 +11,12 @@ import {
   Dialog,
   DialogContent,
 } from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 interface UrlUploadProps {
   onFileDownloaded: (file: File) => Promise<void>;
@@ -381,24 +387,34 @@ export const UrlUpload = ({ onFileDownloaded, disabled }: UrlUploadProps) => {
   };
 
   const handleStreamVideo = (download: DownloadState) => {
-    // Check if format is browser-playable
-    const ext = download.fileName.split(".").pop()?.toLowerCase() || "";
-    const playableFormats = ["mp4", "webm", "ogg", "mov", "m4v"];
-    
-    if (!playableFormats.includes(ext)) {
-      toast.error(`הפורמט ${ext.toUpperCase()} לא נתמך להזרמה בדפדפן`, {
-        description: "פורמטים נתמכים: MP4, WebM, MOV. הורד את הקובץ או השתמש בנגן חיצוני.",
-        duration: 6000,
-      });
-      return;
-    }
-    
     // Create streaming URL through proxy
     const streamUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/stream-video?url=${encodeURIComponent(download.url)}`;
     setStreamingUrl({ 
       url: streamUrl, 
       title: download.fileName 
     });
+  };
+
+  const handleOpenInNewTab = (download: DownloadState) => {
+    const streamUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/stream-video?url=${encodeURIComponent(download.url)}`;
+    window.open(streamUrl, '_blank');
+    toast.success("נפתח בטאב חדש");
+  };
+
+  const handleCopyStreamLink = async (download: DownloadState) => {
+    const streamUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/stream-video?url=${encodeURIComponent(download.url)}`;
+    try {
+      await navigator.clipboard.writeText(streamUrl);
+      toast.success("הקישור הועתק! הדבק ב-VLC או נגן אחר");
+    } catch {
+      toast.error("לא ניתן להעתיק");
+    }
+  };
+
+  const isPlayableInBrowser = (fileName: string): boolean => {
+    const ext = fileName.split(".").pop()?.toLowerCase() || "";
+    const playableFormats = ["mp4", "webm", "ogg", "mov", "m4v"];
+    return playableFormats.includes(ext);
   };
 
   return (
@@ -524,15 +540,44 @@ export const UrlUpload = ({ onFileDownloaded, disabled }: UrlUploadProps) => {
                 )}
                 {download.status === "complete" && download.isVideo && (
                   <>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => handleStreamVideo(download)}
-                      className="text-primary"
-                    >
-                      <Play className="w-4 h-4 ml-1" />
-                      צפה
-                    </Button>
+                    {isPlayableInBrowser(download.fileName) ? (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => handleStreamVideo(download)}
+                        className="text-primary"
+                      >
+                        <Play className="w-4 h-4 ml-1" />
+                        צפה
+                      </Button>
+                    ) : (
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="text-primary"
+                          >
+                            <Play className="w-4 h-4 ml-1" />
+                            צפה
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem onClick={() => handleStreamVideo(download)}>
+                            <Play className="w-4 h-4 ml-2" />
+                            נסה לנגן בדפדפן
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => handleOpenInNewTab(download)}>
+                            <ExternalLink className="w-4 h-4 ml-2" />
+                            פתח בטאב חדש
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => handleCopyStreamLink(download)}>
+                            <Copy className="w-4 h-4 ml-2" />
+                            העתק קישור ל-VLC
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    )}
                     <Button
                       variant="ghost"
                       size="sm"
