@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
@@ -8,6 +8,7 @@ import { VideoCard } from "@/components/VideoCard";
 import { VideoModal } from "@/components/VideoModal";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Progress } from "@/components/ui/progress";
 import { 
   Dialog, 
   DialogContent, 
@@ -34,7 +35,9 @@ import {
   Video,
   ArrowLeft,
   Loader2,
-  FolderOpen
+  FolderOpen,
+  FolderInput,
+  CheckCircle2
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -56,6 +59,13 @@ interface FolderItem {
   color: string | null;
   parent_id: string | null;
   created_at: string;
+}
+
+interface UploadingFile {
+  file: File;
+  name: string;
+  progress: number;
+  status: "pending" | "uploading" | "complete" | "error";
 }
 
 const folderColors = [
@@ -89,6 +99,11 @@ const MyVideos = () => {
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [itemToDelete, setItemToDelete] = useState<{ type: "video" | "folder"; id: string; name: string } | null>(null);
 
+  // Drag and drop state
+  const [draggingOverFolder, setDraggingOverFolder] = useState<string | null>(null);
+  const [uploadingFiles, setUploadingFiles] = useState<UploadingFile[]>([]);
+  const [showUploadProgress, setShowUploadProgress] = useState(false);
+
   useEffect(() => {
     if (!authLoading && !user) {
       navigate("/auth");
@@ -107,14 +122,6 @@ const MyVideos = () => {
     setIsLoading(true);
     try {
       // Fetch folders
-      const { data: foldersData, error: foldersError } = await supabase
-        .from("folders")
-        .select("*")
-        .eq("user_id", user.id)
-        .eq("parent_id", currentFolderId ?? "")
-        .order("name");
-
-      // For root level, we need to handle null parent_id differently
       let folderQuery = supabase
         .from("folders")
         .select("*")
@@ -161,6 +168,205 @@ const MyVideos = () => {
       setIsLoading(false);
     }
   };
+
+  // Drag and drop handlers
+  const traverseFileTree = (entry: FileSystemEntry, basePath: string): Promise<{ file: File; path: string }[]> => {
+    return new Promise((resolve) => {
+      if (entry.isFile) {
+        (entry as FileSystemFileEntry).file((file) => {
+          resolve([{ file, path: basePath }]);
+        }, () => resolve([]));
+      } else if (entry.isDirectory) {
+        const dirReader = (entry as FileSystemDirectoryEntry).createReader();
+        const allEntries: FileSystemEntry[] = [];
+        const newPath = basePath ? `${basePath}/${entry.name}` : entry.name;
+        
+        const readEntries = () => {
+          dirReader.readEntries((entries) => {
+            if (entries.length === 0) {
+              Promise.all(allEntries.map(e => traverseFileTree(e, newPath))).then((results) => {
+                resolve(results.flat());
+              });
+            } else {
+              allEntries.push(...entries);
+              readEntries();
+            }
+          }, () => resolve([]));
+        };
+        
+        readEntries();
+      } else {
+        resolve([]);
+      }
+    });
+  };
+
+  const handleFolderDragOver = useCallback((e: React.DragEvent, folderId: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDraggingOverFolder(folderId);
+  }, []);
+
+  const handleFolderDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDraggingOverFolder(null);
+  }, []);
+
+  const handleFolderDrop = useCallback(async (e: React.DragEvent, targetFolderId: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDraggingOverFolder(null);
+
+    if (!user) {
+      toast.error("יש להתחבר כדי להעלות קבצים");
+      return;
+    }
+
+    const items = e.dataTransfer.items;
+    const filePromises: Promise<{ file: File; path: string }[]>[] = [];
+
+    if (items) {
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        if (item.kind === "file") {
+          const entry = item.webkitGetAsEntry?.();
+          if (entry) {
+            filePromises.push(traverseFileTree(entry, ""));
+          } else {
+            const file = item.getAsFile();
+            if (file) {
+              filePromises.push(Promise.resolve([{ file, path: "" }]));
+            }
+          }
+        }
+      }
+    }
+
+    const fileArrays = await Promise.all(filePromises);
+    const allFiles = fileArrays.flat();
+
+    if (allFiles.length === 0) {
+      toast.error("לא נמצאו קבצים");
+      return;
+    }
+
+    toast.success(`מעלה ${allFiles.length} קבצים לתיקייה`);
+    setShowUploadProgress(true);
+
+    // Create subfolders and upload files
+    const createdFolders = new Map<string, string>();
+    const uploadFiles: UploadingFile[] = allFiles.map(({ file }) => ({
+      file,
+      name: file.name,
+      progress: 0,
+      status: "pending" as const,
+    }));
+    setUploadingFiles(uploadFiles);
+
+    // First create folder structure
+    const uniqueFolderPaths = [...new Set(allFiles.map(f => f.path).filter(Boolean))];
+    uniqueFolderPaths.sort((a, b) => a.split("/").length - b.split("/").length);
+
+    for (const folderPath of uniqueFolderPaths) {
+      const parts = folderPath.split("/");
+      let parentId: string = targetFolderId;
+      
+      for (let i = 0; i < parts.length; i++) {
+        const currentPath = parts.slice(0, i + 1).join("/");
+        
+        if (createdFolders.has(currentPath)) {
+          parentId = createdFolders.get(currentPath)!;
+          continue;
+        }
+
+        const folderName = parts[i];
+        const { data, error } = await supabase.from("folders").insert({
+          user_id: user.id,
+          name: folderName,
+          parent_id: parentId,
+        }).select().single();
+
+        if (!error && data) {
+          createdFolders.set(currentPath, data.id);
+          parentId = data.id;
+        }
+      }
+    }
+
+    // Upload files
+    let successCount = 0;
+    for (let i = 0; i < allFiles.length; i++) {
+      const { file, path } = allFiles[i];
+      
+      // Update status
+      setUploadingFiles(prev => prev.map((f, idx) => 
+        idx === i ? { ...f, status: "uploading" as const, progress: 5 } : f
+      ));
+
+      try {
+        const fileExt = file.name.split(".").pop();
+        const fileName = `${user.id}/${Date.now()}-${Math.random().toString(36).substring(7)}.${fileExt}`;
+
+        // Simulate progress
+        const progressInterval = setInterval(() => {
+          setUploadingFiles(prev => prev.map((f, idx) => {
+            if (idx === i && f.status === "uploading" && f.progress < 90) {
+              return { ...f, progress: f.progress + Math.random() * 15 };
+            }
+            return f;
+          }));
+        }, 300);
+
+        const { data, error } = await supabase.storage
+          .from("videos")
+          .upload(fileName, file, { cacheControl: "3600" });
+
+        clearInterval(progressInterval);
+
+        if (error) {
+          setUploadingFiles(prev => prev.map((f, idx) => 
+            idx === i ? { ...f, status: "error" as const } : f
+          ));
+          continue;
+        }
+
+        const { data: urlData } = supabase.storage.from("videos").getPublicUrl(data.path);
+        
+        // Determine target folder
+        const fileFolderId = path ? createdFolders.get(path) || targetFolderId : targetFolderId;
+
+        // Save to database
+        await supabase.from("videos").insert({
+          user_id: user.id,
+          title: file.name.replace(/\.[^/.]+$/, ""),
+          video_url: urlData.publicUrl,
+          folder_id: fileFolderId,
+          category: "כללי",
+        });
+
+        setUploadingFiles(prev => prev.map((f, idx) => 
+          idx === i ? { ...f, status: "complete" as const, progress: 100 } : f
+        ));
+        successCount++;
+      } catch (error) {
+        setUploadingFiles(prev => prev.map((f, idx) => 
+          idx === i ? { ...f, status: "error" as const } : f
+        ));
+      }
+    }
+
+    if (successCount > 0) {
+      toast.success(`${successCount} קבצים הועלו בהצלחה`);
+      fetchContent();
+    }
+
+    // Hide progress after a delay
+    setTimeout(() => {
+      setShowUploadProgress(false);
+      setUploadingFiles([]);
+    }, 2000);
+  }, [user, fetchContent]);
 
   const createFolder = async () => {
     if (!user || !folderName.trim()) return;
@@ -316,7 +522,7 @@ const MyVideos = () => {
                 <span className="text-gradient">הסרטונים שלי</span>
               </h1>
               <p className="text-muted-foreground">
-                נהל את כל הסרטונים והתיקיות שלך במקום אחד
+                נהל את כל הסרטונים והתיקיות שלך במקום אחד • גרור קבצים לתיקייה להעלאה מהירה
               </p>
             </div>
 
@@ -339,6 +545,34 @@ const MyVideos = () => {
               </Button>
             </div>
           </div>
+
+          {/* Upload Progress Overlay */}
+          {showUploadProgress && uploadingFiles.length > 0 && (
+            <div className="fixed bottom-4 left-4 right-4 md:left-auto md:right-4 md:w-96 z-50 p-4 rounded-xl bg-card border border-primary/30 shadow-xl animate-fade-up">
+              <div className="flex items-center gap-2 mb-3">
+                <FolderInput className="w-5 h-5 text-primary" />
+                <span className="font-semibold">מעלה קבצים לתיקייה</span>
+              </div>
+              <div className="space-y-2 max-h-40 overflow-y-auto">
+                {uploadingFiles.map((file, idx) => (
+                  <div key={idx} className="flex items-center gap-2">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm truncate">{file.name}</p>
+                      {file.status === "uploading" && (
+                        <Progress value={file.progress} className="h-1 mt-1" />
+                      )}
+                    </div>
+                    {file.status === "complete" && (
+                      <CheckCircle2 className="w-4 h-4 text-primary flex-shrink-0" />
+                    )}
+                    {file.status === "uploading" && (
+                      <Loader2 className="w-4 h-4 animate-spin text-primary flex-shrink-0" />
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Breadcrumb / Back button */}
           {currentFolderId && (
@@ -394,24 +628,36 @@ const MyVideos = () => {
                   <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
                     <Folder className="w-5 h-5 text-primary" />
                     תיקיות ({filteredFolders.length})
+                    <span className="text-xs text-muted-foreground font-normal">• גרור קבצים לתיקייה להעלאה</span>
                   </h2>
                   <div className={`grid gap-4 ${viewMode === "grid" ? 'grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6' : 'grid-cols-1'}`}>
                     {filteredFolders.map((folder) => (
                       <div
                         key={folder.id}
-                        className="group relative p-4 rounded-xl bg-card border border-border hover:border-primary/50 transition-all cursor-pointer"
+                        className={`group relative p-4 rounded-xl bg-card border-2 transition-all cursor-pointer ${
+                          draggingOverFolder === folder.id 
+                            ? 'border-primary bg-primary/10 scale-105' 
+                            : 'border-border hover:border-primary/50'
+                        }`}
                         onClick={() => setCurrentFolderId(folder.id)}
+                        onDragOver={(e) => handleFolderDragOver(e, folder.id)}
+                        onDragLeave={handleFolderDragLeave}
+                        onDrop={(e) => handleFolderDrop(e, folder.id)}
                       >
                         <div className="flex items-center gap-3">
                           <div 
-                            className="w-12 h-12 rounded-xl flex items-center justify-center"
+                            className={`w-12 h-12 rounded-xl flex items-center justify-center transition-transform ${
+                              draggingOverFolder === folder.id ? 'scale-110' : ''
+                            }`}
                             style={{ backgroundColor: `${folder.color}20` }}
                           >
                             <FolderOpen className="w-6 h-6" style={{ color: folder.color || "#3b82f6" }} />
                           </div>
                           <div className="flex-1 min-w-0">
                             <p className="font-medium truncate">{folder.name}</p>
-                            <p className="text-sm text-muted-foreground">{formatDate(folder.created_at)}</p>
+                            <p className="text-sm text-muted-foreground">
+                              {draggingOverFolder === folder.id ? "שחרר להעלאה" : formatDate(folder.created_at)}
+                            </p>
                           </div>
                         </div>
 
@@ -500,7 +746,7 @@ const MyVideos = () => {
                             <Button
                               variant="ghost"
                               size="icon"
-                              className="absolute top-2 left-2 opacity-0 group-hover:opacity-100 transition-opacity z-10 bg-background/80"
+                              className="absolute top-2 left-2 opacity-0 group-hover:opacity-100 transition-opacity bg-background/80 backdrop-blur"
                             >
                               <MoreVertical className="w-4 h-4" />
                             </Button>
@@ -530,30 +776,44 @@ const MyVideos = () => {
 
       <Footer />
 
+      {/* Video Modal */}
+      {selectedVideo && (
+        <VideoModal
+          isOpen={!!selectedVideo}
+          onClose={() => setSelectedVideo(null)}
+          video={{
+            title: selectedVideo.title,
+            videoUrl: selectedVideo.video_url || "",
+            thumbnail: selectedVideo.thumbnail_url || "",
+          }}
+        />
+      )}
+
       {/* Folder Dialog */}
       <Dialog open={showFolderDialog} onOpenChange={setShowFolderDialog}>
-        <DialogContent className="sm:max-w-md" dir="rtl">
+        <DialogContent>
           <DialogHeader>
             <DialogTitle>{editingFolder ? "עריכת תיקיה" : "תיקיה חדשה"}</DialogTitle>
           </DialogHeader>
-          <div className="space-y-4 py-4">
-            <div className="space-y-2">
-              <label className="text-sm font-medium">שם התיקיה</label>
+          <div className="space-y-4">
+            <div>
+              <label className="text-sm font-medium mb-2 block">שם התיקיה</label>
               <Input
                 value={folderName}
                 onChange={(e) => setFolderName(e.target.value)}
                 placeholder="הזן שם לתיקיה"
+                className="bg-secondary"
               />
             </div>
-            <div className="space-y-2">
-              <label className="text-sm font-medium">צבע</label>
+            <div>
+              <label className="text-sm font-medium mb-2 block">צבע</label>
               <div className="flex gap-2">
                 {folderColors.map((color) => (
                   <button
                     key={color.value}
-                    onClick={() => setFolderColor(color.value)}
-                    className={`w-8 h-8 rounded-full transition-transform ${folderColor === color.value ? 'scale-110 ring-2 ring-offset-2 ring-primary' : ''}`}
+                    className={`w-8 h-8 rounded-full transition-all ${folderColor === color.value ? 'ring-2 ring-offset-2 ring-primary' : ''}`}
                     style={{ backgroundColor: color.value }}
+                    onClick={() => setFolderColor(color.value)}
                     title={color.name}
                   />
                 ))}
@@ -577,36 +837,28 @@ const MyVideos = () => {
 
       {/* Delete Confirmation Dialog */}
       <Dialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
-        <DialogContent className="sm:max-w-md" dir="rtl">
+        <DialogContent>
           <DialogHeader>
             <DialogTitle>אישור מחיקה</DialogTitle>
           </DialogHeader>
-          <p className="py-4">
+          <p>
             האם אתה בטוח שברצונך למחוק את {itemToDelete?.type === "folder" ? "התיקיה" : "הסרטון"} "{itemToDelete?.name}"?
-            {itemToDelete?.type === "folder" && " כל הסרטונים בתיקיה יועברו לתיקיה הראשית."}
           </p>
+          {itemToDelete?.type === "folder" && (
+            <p className="text-sm text-muted-foreground">
+              שים לב: מחיקת התיקיה לא תמחק את הסרטונים שבתוכה
+            </p>
+          )}
           <DialogFooter>
             <Button variant="ghost" onClick={() => setShowDeleteDialog(false)}>
               ביטול
             </Button>
             <Button variant="destructive" onClick={deleteItem}>
-              <Trash2 className="w-4 h-4 ml-2" />
               מחק
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
-      {/* Video Modal */}
-      <VideoModal
-        isOpen={!!selectedVideo}
-        onClose={() => setSelectedVideo(null)}
-        video={selectedVideo ? {
-          title: selectedVideo.title,
-          videoUrl: selectedVideo.video_url || "",
-          thumbnail: selectedVideo.thumbnail_url || "",
-        } : null}
-      />
     </div>
   );
 };
