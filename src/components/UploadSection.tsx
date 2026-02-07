@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useMemo } from "react";
-import { Upload, Cloud, CheckCircle2, X, Loader2, AlertCircle, FolderOpen, File, FileImage, FileText, FileVideo, ChevronDown, ChevronLeft, Pause, Play } from "lucide-react";
+import { Upload, Cloud, CheckCircle2, X, Loader2, AlertCircle, FolderOpen, File, FileImage, FileText, FileVideo, ChevronDown, ChevronLeft, Pause, Play, Link2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -10,6 +10,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 import { useNavigate } from "react-router-dom";
 import { useUploadManager, FolderNode } from "@/hooks/useUploadManager";
+import { UrlUpload } from "@/components/UrlUpload";
 
 const categories = ["הדרכה", "ישיבות", "מוצר", "וובינר", "דוחות", "כללי"];
 
@@ -553,6 +554,17 @@ export const UploadSection = () => {
                 </p>
               </div>
             </div>
+
+            {/* URL Upload */}
+            <UrlUpload 
+              onFileDownloaded={async (file) => {
+                await addFiles([{ file, path: "" }]);
+                if (!title) {
+                  setTitle(file.name.replace(/\.[^/.]+$/, ""));
+                }
+              }}
+              disabled={isUploading}
+            />
 
             {/* Overall Progress with Pause/Resume */}
             {isUploading && (
