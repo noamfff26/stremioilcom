@@ -14,7 +14,78 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      profiles: {
+        Row: {
+          avatar_url: string | null
+          created_at: string
+          display_name: string | null
+          id: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          avatar_url?: string | null
+          created_at?: string
+          display_name?: string | null
+          id?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          avatar_url?: string | null
+          created_at?: string
+          display_name?: string | null
+          id?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      videos: {
+        Row: {
+          category: string | null
+          created_at: string
+          description: string | null
+          duration_seconds: number | null
+          id: string
+          sharepoint_path: string | null
+          thumbnail_url: string | null
+          title: string
+          updated_at: string
+          user_id: string
+          video_url: string | null
+          views_count: number | null
+        }
+        Insert: {
+          category?: string | null
+          created_at?: string
+          description?: string | null
+          duration_seconds?: number | null
+          id?: string
+          sharepoint_path?: string | null
+          thumbnail_url?: string | null
+          title: string
+          updated_at?: string
+          user_id: string
+          video_url?: string | null
+          views_count?: number | null
+        }
+        Update: {
+          category?: string | null
+          created_at?: string
+          description?: string | null
+          duration_seconds?: number | null
+          id?: string
+          sharepoint_path?: string | null
+          thumbnail_url?: string | null
+          title?: string
+          updated_at?: string
+          user_id?: string
+          video_url?: string | null
+          views_count?: number | null
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
