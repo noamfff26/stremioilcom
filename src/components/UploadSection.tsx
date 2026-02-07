@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef } from "react";
-import { Upload, Cloud, Video, FileVideo, CheckCircle2, X, Loader2, AlertCircle, FolderOpen } from "lucide-react";
+import { Upload, Cloud, Video, FileVideo, CheckCircle2, X, Loader2, AlertCircle, FolderOpen, File, FileImage, FileText, FileArchive } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -19,6 +19,7 @@ interface UploadedFile {
   status: "pending" | "uploading" | "complete" | "error";
   errorMessage?: string;
   duration?: number;
+  fileType: "video" | "image" | "document" | "other";
 }
 
 const categories = ["הדרכה", "ישיבות", "מוצר", "וובינר", "דוחות", "כללי"];
@@ -63,7 +64,7 @@ export const UploadSection = () => {
             filePromises.push(traverseFileTree(entry));
           } else {
             const file = item.getAsFile();
-            if (file && file.type.startsWith("video/")) {
+            if (file) {
               filePromises.push(Promise.resolve([file]));
             }
           }
@@ -72,9 +73,9 @@ export const UploadSection = () => {
     }
 
     Promise.all(filePromises).then((fileArrays) => {
-      const allFiles = fileArrays.flat().filter(file => file.type.startsWith("video/"));
+      const allFiles = fileArrays.flat();
       if (allFiles.length === 0) {
-        toast.error("יש לבחור קבצי וידאו בלבד");
+        toast.error("לא נמצאו קבצים");
         return;
       }
       addFiles(allFiles);
@@ -114,9 +115,7 @@ export const UploadSection = () => {
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
-      const files = Array.from(e.target.files).filter(file => 
-        file.type.startsWith("video/")
-      );
+      const files = Array.from(e.target.files);
       if (files.length > 0) {
         addFiles(files);
       }
@@ -129,14 +128,12 @@ export const UploadSection = () => {
 
   const handleFolderSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
-      const files = Array.from(e.target.files).filter(file => 
-        file.type.startsWith("video/")
-      );
+      const files = Array.from(e.target.files);
       if (files.length > 0) {
         addFiles(files);
-        toast.success(`נמצאו ${files.length} סרטונים בתיקייה`);
+        toast.success(`נמצאו ${files.length} קבצים בתיקייה`);
       } else {
-        toast.error("לא נמצאו קבצי וידאו בתיקייה");
+        toast.error("לא נמצאו קבצים בתיקייה");
       }
     }
     // Reset input
@@ -145,8 +142,45 @@ export const UploadSection = () => {
     }
   };
 
+  const getFileType = (file: File): "video" | "image" | "document" | "other" => {
+    if (file.type.startsWith("video/")) return "video";
+    if (file.type.startsWith("image/")) return "image";
+    if (file.type.includes("pdf") || file.type.includes("document") || file.type.includes("text") || 
+        file.type.includes("spreadsheet") || file.type.includes("presentation")) return "document";
+    return "other";
+  };
+
+  const getFileIcon = (fileType: "video" | "image" | "document" | "other") => {
+    switch (fileType) {
+      case "video": return FileVideo;
+      case "image": return FileImage;
+      case "document": return FileText;
+      default: return File;
+    }
+  };
+
   const generateThumbnail = (file: File): Promise<{ thumbnail: string; duration: number }> => {
     return new Promise((resolve) => {
+      const fileType = getFileType(file);
+      
+      // For images, use the image itself as thumbnail
+      if (fileType === "image") {
+        const reader = new FileReader();
+        reader.onload = () => {
+          resolve({ thumbnail: reader.result as string, duration: 0 });
+        };
+        reader.onerror = () => resolve({ thumbnail: "", duration: 0 });
+        reader.readAsDataURL(file);
+        return;
+      }
+      
+      // For non-video files, no thumbnail
+      if (fileType !== "video") {
+        resolve({ thumbnail: "", duration: 0 });
+        return;
+      }
+      
+      // For videos, generate thumbnail from video frame
       const video = document.createElement("video");
       const canvas = document.createElement("canvas");
       const ctx = canvas.getContext("2d");
@@ -180,12 +214,12 @@ export const UploadSection = () => {
       video.src = URL.createObjectURL(file);
     });
   };
-
   const addFiles = async (files: File[]) => {
     const newFiles: UploadedFile[] = [];
     
     for (const file of files) {
       const preview = URL.createObjectURL(file);
+      const fileType = getFileType(file);
       const { thumbnail, duration } = await generateThumbnail(file);
       
       newFiles.push({
@@ -195,6 +229,7 @@ export const UploadSection = () => {
         progress: 0,
         status: "pending",
         duration,
+        fileType,
       });
     }
     
@@ -487,7 +522,7 @@ export const UploadSection = () => {
 
                 {/* Text */}
                 <h3 className="text-xl font-semibold mb-2 text-foreground">
-                  {isDragging ? 'שחרר כאן להעלאה' : 'גרור קבצי וידאו לכאן'}
+                  {isDragging ? 'שחרר כאן להעלאה' : 'גרור קבצים לכאן'}
                 </h3>
                 <p className="text-muted-foreground mb-6">
                   או לחץ לבחירת קבצים מהמחשב
@@ -499,7 +534,6 @@ export const UploadSection = () => {
                     <input
                       ref={fileInputRef}
                       type="file"
-                      accept="video/*"
                       multiple
                       onChange={handleFileSelect}
                       className="hidden"
@@ -516,7 +550,6 @@ export const UploadSection = () => {
                     <input
                       ref={folderInputRef}
                       type="file"
-                      accept="video/*"
                       onChange={handleFolderSelect}
                       className="hidden"
                       {...{ webkitdirectory: "", directory: "" } as React.InputHTMLAttributes<HTMLInputElement>}
@@ -532,7 +565,7 @@ export const UploadSection = () => {
 
                 {/* Supported Formats */}
                 <p className="text-sm text-muted-foreground mt-4">
-                  פורמטים נתמכים: MP4, MOV, AVI, WebM, MKV • ללא הגבלת גודל • גרור תיקייה להעלאה
+                  כל סוגי הקבצים נתמכים: וידאו, תמונות, מסמכים ועוד • ללא הגבלת גודל • גרור תיקייה להעלאה
                 </p>
               </div>
             </div>
@@ -559,21 +592,26 @@ export const UploadSection = () => {
                       file.status === "error" ? "border-destructive/50" : "border-border"
                     }`}
                   >
-                    {/* Thumbnail */}
-                    <div className="relative w-24 h-16 rounded-lg overflow-hidden bg-secondary flex-shrink-0">
+                    {/* Thumbnail / Icon */}
+                    <div className="relative w-24 h-16 rounded-lg overflow-hidden bg-secondary flex-shrink-0 flex items-center justify-center">
                       {file.thumbnail ? (
                         <img 
                           src={file.thumbnail} 
                           alt="תצוגה מקדימה"
                           className="w-full h-full object-cover"
                         />
-                      ) : (
+                      ) : file.fileType === "video" ? (
                         <video 
                           src={file.preview} 
                           className="w-full h-full object-cover"
                         />
+                      ) : (
+                        (() => {
+                          const IconComponent = getFileIcon(file.fileType);
+                          return <IconComponent className="w-8 h-8 text-muted-foreground" />;
+                        })()
                       )}
-                      {file.duration && (
+                      {file.duration && file.duration > 0 && (
                         <div className="absolute bottom-1 right-1 px-1.5 py-0.5 rounded bg-background/80 text-xs">
                           {formatDuration(file.duration)}
                         </div>

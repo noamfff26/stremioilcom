@@ -54,7 +54,6 @@ export const HeroSection = () => {
       <input
         ref={fileInputRef}
         type="file"
-        accept="video/*"
         multiple
         onChange={handleFileSelect}
         className="hidden"
@@ -62,7 +61,6 @@ export const HeroSection = () => {
       <input
         ref={folderInputRef}
         type="file"
-        accept="video/*"
         onChange={handleFileSelect}
         className="hidden"
         {...{ webkitdirectory: "", directory: "" } as React.InputHTMLAttributes<HTMLInputElement>}
