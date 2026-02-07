@@ -1,5 +1,5 @@
-import { useState, useCallback, useRef } from "react";
-import { Upload, Cloud, Video, FileVideo, CheckCircle2, X, Loader2, AlertCircle, FolderOpen, File, FileImage, FileText, FileArchive } from "lucide-react";
+import { useState, useCallback, useRef, useMemo } from "react";
+import { Upload, Cloud, Video, FileVideo, CheckCircle2, X, Loader2, AlertCircle, FolderOpen, File, FileImage, FileText, ChevronDown, ChevronLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -10,6 +10,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { useNavigate } from "react-router-dom";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 
 interface UploadedFile {
   file: File;
@@ -20,6 +21,18 @@ interface UploadedFile {
   errorMessage?: string;
   duration?: number;
   fileType: "video" | "image" | "document" | "other";
+  relativePath: string; // Path relative to upload root
+  folderPath: string; // Folder path only (without filename)
+}
+
+interface FolderNode {
+  name: string;
+  path: string;
+  files: UploadedFile[];
+  subfolders: Map<string, FolderNode>;
+  isOpen: boolean;
+  progress: number;
+  status: "pending" | "uploading" | "complete" | "partial" | "error";
 }
 
 const categories = ["הדרכה", "ישיבות", "מוצר", "וובינר", "דוחות", "כללי"];
@@ -32,11 +45,108 @@ export const UploadSection = () => {
   const [category, setCategory] = useState("כללי");
   const [isUploading, setIsUploading] = useState(false);
   const [overallProgress, setOverallProgress] = useState(0);
+  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set([""]));
+  const [currentUploadingFile, setCurrentUploadingFile] = useState<string>("");
   const fileInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
   
   const { user } = useAuth();
   const navigate = useNavigate();
+
+  // Build folder tree from files
+  const folderTree = useMemo(() => {
+    const root: FolderNode = {
+      name: "קבצים",
+      path: "",
+      files: [],
+      subfolders: new Map(),
+      isOpen: true,
+      progress: 0,
+      status: "pending"
+    };
+
+    for (const file of uploadedFiles) {
+      const pathParts = file.folderPath.split("/").filter(Boolean);
+      let currentNode = root;
+
+      // Navigate/create folder structure
+      for (let i = 0; i < pathParts.length; i++) {
+        const folderName = pathParts[i];
+        const folderPath = pathParts.slice(0, i + 1).join("/");
+        
+        if (!currentNode.subfolders.has(folderName)) {
+          currentNode.subfolders.set(folderName, {
+            name: folderName,
+            path: folderPath,
+            files: [],
+            subfolders: new Map(),
+            isOpen: expandedFolders.has(folderPath),
+            progress: 0,
+            status: "pending"
+          });
+        }
+        currentNode = currentNode.subfolders.get(folderName)!;
+      }
+
+      // Add file to appropriate folder
+      if (pathParts.length === 0) {
+        root.files.push(file);
+      } else {
+        currentNode.files.push(file);
+      }
+    }
+
+    // Calculate folder statuses
+    const calculateFolderStatus = (node: FolderNode): void => {
+      const allFiles: UploadedFile[] = [];
+      const collectFiles = (n: FolderNode) => {
+        allFiles.push(...n.files);
+        n.subfolders.forEach(sub => collectFiles(sub));
+      };
+      collectFiles(node);
+
+      if (allFiles.length === 0) {
+        node.status = "pending";
+        node.progress = 0;
+        return;
+      }
+
+      const totalProgress = allFiles.reduce((sum, f) => sum + f.progress, 0);
+      node.progress = Math.round(totalProgress / allFiles.length);
+
+      const statuses = allFiles.map(f => f.status);
+      if (statuses.every(s => s === "complete")) {
+        node.status = "complete";
+      } else if (statuses.every(s => s === "pending")) {
+        node.status = "pending";
+      } else if (statuses.some(s => s === "error")) {
+        node.status = statuses.every(s => s === "error") ? "error" : "partial";
+      } else if (statuses.some(s => s === "uploading")) {
+        node.status = "uploading";
+      } else {
+        node.status = "partial";
+      }
+
+      node.subfolders.forEach(sub => calculateFolderStatus(sub));
+    };
+
+    calculateFolderStatus(root);
+    return root;
+  }, [uploadedFiles, expandedFolders]);
+
+  const toggleFolder = (path: string) => {
+    setExpandedFolders(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(path)) {
+        newSet.delete(path);
+      } else {
+        newSet.add(path);
+      }
+      return newSet;
+    });
+  };
+
+  const hasSubfolders = uploadedFiles.some(f => f.folderPath.length > 0);
 
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
@@ -51,9 +161,8 @@ export const UploadSection = () => {
     e.preventDefault();
     setIsDragging(false);
     
-    // Handle both files and folders via DataTransferItemList
     const items = e.dataTransfer.items;
-    const filePromises: Promise<File[]>[] = [];
+    const filePromises: Promise<{ file: File; path: string }[]>[] = [];
 
     if (items) {
       for (let i = 0; i < items.length; i++) {
@@ -61,11 +170,11 @@ export const UploadSection = () => {
         if (item.kind === "file") {
           const entry = item.webkitGetAsEntry?.();
           if (entry) {
-            filePromises.push(traverseFileTree(entry));
+            filePromises.push(traverseFileTree(entry, ""));
           } else {
             const file = item.getAsFile();
             if (file) {
-              filePromises.push(Promise.resolve([file]));
+              filePromises.push(Promise.resolve([{ file, path: "" }]));
             }
           }
         }
@@ -78,25 +187,26 @@ export const UploadSection = () => {
         toast.error("לא נמצאו קבצים");
         return;
       }
-      addFiles(allFiles);
+      addFilesWithPaths(allFiles);
     });
   }, []);
 
-  // Recursively traverse folder entries
-  const traverseFileTree = (entry: FileSystemEntry): Promise<File[]> => {
+  // Recursively traverse folder entries with path tracking
+  const traverseFileTree = (entry: FileSystemEntry, basePath: string): Promise<{ file: File; path: string }[]> => {
     return new Promise((resolve) => {
       if (entry.isFile) {
         (entry as FileSystemFileEntry).file((file) => {
-          resolve([file]);
+          resolve([{ file, path: basePath }]);
         }, () => resolve([]));
       } else if (entry.isDirectory) {
         const dirReader = (entry as FileSystemDirectoryEntry).createReader();
         const allEntries: FileSystemEntry[] = [];
+        const newPath = basePath ? `${basePath}/${entry.name}` : entry.name;
         
         const readEntries = () => {
           dirReader.readEntries((entries) => {
             if (entries.length === 0) {
-              Promise.all(allEntries.map(traverseFileTree)).then((results) => {
+              Promise.all(allEntries.map(e => traverseFileTree(e, newPath))).then((results) => {
                 resolve(results.flat());
               });
             } else {
@@ -117,10 +227,9 @@ export const UploadSection = () => {
     if (e.target.files) {
       const files = Array.from(e.target.files);
       if (files.length > 0) {
-        addFiles(files);
+        addFilesWithPaths(files.map(f => ({ file: f, path: "" })));
       }
     }
-    // Reset input
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
     }
@@ -130,13 +239,22 @@ export const UploadSection = () => {
     if (e.target.files) {
       const files = Array.from(e.target.files);
       if (files.length > 0) {
-        addFiles(files);
-        toast.success(`נמצאו ${files.length} קבצים בתיקייה`);
+        // Extract folder structure from webkitRelativePath
+        const filesWithPaths = files.map(f => {
+          const relativePath = (f as any).webkitRelativePath || f.name;
+          const pathParts = relativePath.split("/");
+          pathParts.pop(); // Remove filename
+          return { file: f, path: pathParts.join("/") };
+        });
+        addFilesWithPaths(filesWithPaths);
+        
+        // Get root folder name
+        const rootFolder = files[0] && (files[0] as any).webkitRelativePath?.split("/")[0];
+        toast.success(`נמצאו ${files.length} קבצים בתיקייה "${rootFolder}"`);
       } else {
         toast.error("לא נמצאו קבצים בתיקייה");
       }
     }
-    // Reset input
     if (folderInputRef.current) {
       folderInputRef.current.value = "";
     }
@@ -163,7 +281,6 @@ export const UploadSection = () => {
     return new Promise((resolve) => {
       const fileType = getFileType(file);
       
-      // For images, use the image itself as thumbnail
       if (fileType === "image") {
         const reader = new FileReader();
         reader.onload = () => {
@@ -174,13 +291,11 @@ export const UploadSection = () => {
         return;
       }
       
-      // For non-video files, no thumbnail
       if (fileType !== "video") {
         resolve({ thumbnail: "", duration: 0 });
         return;
       }
       
-      // For videos, generate thumbnail from video frame
       const video = document.createElement("video");
       const canvas = document.createElement("canvas");
       const ctx = canvas.getContext("2d");
@@ -190,7 +305,6 @@ export const UploadSection = () => {
       video.playsInline = true;
 
       video.onloadeddata = () => {
-        // Seek to 25% of video for better thumbnail
         video.currentTime = video.duration * 0.25;
       };
 
@@ -214,13 +328,15 @@ export const UploadSection = () => {
       video.src = URL.createObjectURL(file);
     });
   };
-  const addFiles = async (files: File[]) => {
+
+  const addFilesWithPaths = async (filesWithPaths: { file: File; path: string }[]) => {
     const newFiles: UploadedFile[] = [];
     
-    for (const file of files) {
+    for (const { file, path } of filesWithPaths) {
       const preview = URL.createObjectURL(file);
       const fileType = getFileType(file);
       const { thumbnail, duration } = await generateThumbnail(file);
+      const relativePath = path ? `${path}/${file.name}` : file.name;
       
       newFiles.push({
         file,
@@ -230,23 +346,36 @@ export const UploadSection = () => {
         status: "pending",
         duration,
         fileType,
+        relativePath,
+        folderPath: path,
       });
     }
     
     setUploadedFiles(prev => [...prev, ...newFiles]);
     
-    // Auto-fill title if empty
-    if (!title && files.length > 0) {
-      setTitle(files[0].name.replace(/\.[^/.]+$/, ""));
+    // Auto-expand all folders
+    const allPaths = new Set<string>([""]);
+    for (const { path } of filesWithPaths) {
+      const parts = path.split("/").filter(Boolean);
+      for (let i = 0; i <= parts.length; i++) {
+        allPaths.add(parts.slice(0, i).join("/"));
+      }
+    }
+    setExpandedFolders(allPaths);
+    
+    if (!title && filesWithPaths.length > 0) {
+      const rootFolder = filesWithPaths[0].path.split("/")[0];
+      setTitle(rootFolder || filesWithPaths[0].file.name.replace(/\.[^/.]+$/, ""));
     }
   };
 
-  const removeFile = (index: number) => {
+  const removeFile = (relativePath: string) => {
     setUploadedFiles(prev => {
-      const newFiles = [...prev];
-      URL.revokeObjectURL(newFiles[index].preview);
-      newFiles.splice(index, 1);
-      return newFiles;
+      const fileToRemove = prev.find(f => f.relativePath === relativePath);
+      if (fileToRemove) {
+        URL.revokeObjectURL(fileToRemove.preview);
+      }
+      return prev.filter(f => f.relativePath !== relativePath);
     });
   };
 
@@ -271,7 +400,6 @@ export const UploadSection = () => {
 
   const uploadThumbnailToStorage = async (thumbnailDataUrl: string, userId: string): Promise<string | null> => {
     try {
-      // Convert data URL to blob
       const response = await fetch(thumbnailDataUrl);
       const blob = await response.blob();
       
@@ -297,13 +425,13 @@ export const UploadSection = () => {
     }
   };
 
-  const uploadToStorage = async (file: File, fileIndex: number): Promise<string | null> => {
+  const uploadToStorage = async (file: UploadedFile, fileIndex: number): Promise<string | null> => {
     if (!user) return null;
 
-    const fileExt = file.name.split(".").pop();
+    const fileExt = file.file.name.split(".").pop();
     const fileName = `${user.id}/${Date.now()}-${Math.random().toString(36).substring(7)}.${fileExt}`;
 
-    // Update status to uploading
+    setCurrentUploadingFile(file.relativePath);
     setUploadedFiles(prev => {
       const newFiles = [...prev];
       newFiles[fileIndex] = { ...newFiles[fileIndex], status: "uploading", progress: 5 };
@@ -311,13 +439,11 @@ export const UploadSection = () => {
     });
 
     try {
-      // For progress simulation since supabase-js doesn't support upload progress directly
       const progressInterval = setInterval(() => {
         setUploadedFiles(prev => {
           const newFiles = [...prev];
           if (newFiles[fileIndex] && newFiles[fileIndex].status === "uploading") {
             const currentProgress = newFiles[fileIndex].progress;
-            // Slowly increase to 90%
             if (currentProgress < 90) {
               newFiles[fileIndex] = { 
                 ...newFiles[fileIndex], 
@@ -331,7 +457,7 @@ export const UploadSection = () => {
 
       const { data, error } = await supabase.storage
         .from("videos")
-        .upload(fileName, file, {
+        .upload(fileName, file.file, {
           cacheControl: "3600",
           upsert: false,
         });
@@ -353,14 +479,12 @@ export const UploadSection = () => {
         return null;
       }
 
-      // Update progress to complete
       setUploadedFiles(prev => {
         const newFiles = [...prev];
         newFiles[fileIndex] = { ...newFiles[fileIndex], status: "complete", progress: 100 };
         return newFiles;
       });
 
-      // Get public URL
       const { data: urlData } = supabase.storage.from("videos").getPublicUrl(data.path);
       return urlData.publicUrl;
     } catch (error) {
@@ -379,9 +503,34 @@ export const UploadSection = () => {
     }
   };
 
+  // Create folder in database
+  const createFolderInDB = async (folderPath: string, parentId: string | null, createdFolders: Map<string, string>): Promise<string | null> => {
+    if (!user) return null;
+    
+    if (createdFolders.has(folderPath)) {
+      return createdFolders.get(folderPath)!;
+    }
+
+    const folderName = folderPath.split("/").pop() || folderPath;
+    
+    const { data, error } = await supabase.from("folders").insert({
+      user_id: user.id,
+      name: folderName,
+      parent_id: parentId,
+    }).select().single();
+
+    if (error) {
+      console.error("Folder creation error:", error);
+      return null;
+    }
+
+    createdFolders.set(folderPath, data.id);
+    return data.id;
+  };
+
   const handleUpload = async () => {
     if (!user) {
-      toast.error("יש להתחבר כדי להעלות סרטונים");
+      toast.error("יש להתחבר כדי להעלות קבצים");
       navigate("/auth");
       return;
     }
@@ -392,7 +541,7 @@ export const UploadSection = () => {
     }
 
     if (!title.trim()) {
-      toast.error("יש להזין כותרת לסרטון");
+      toast.error("יש להזין כותרת");
       return;
     }
 
@@ -400,37 +549,56 @@ export const UploadSection = () => {
     setOverallProgress(0);
 
     let successCount = 0;
+    const createdFolders = new Map<string, string>();
 
     try {
+      // First, create all necessary folders
+      const uniqueFolderPaths = [...new Set(uploadedFiles.map(f => f.folderPath).filter(Boolean))];
+      uniqueFolderPaths.sort((a, b) => a.split("/").length - b.split("/").length);
+
+      for (const folderPath of uniqueFolderPaths) {
+        const parts = folderPath.split("/");
+        let parentId: string | null = null;
+        
+        for (let i = 0; i < parts.length; i++) {
+          const currentPath = parts.slice(0, i + 1).join("/");
+          const folderId = await createFolderInDB(currentPath, parentId, createdFolders);
+          if (folderId) {
+            parentId = folderId;
+          }
+        }
+      }
+
+      // Then upload files
       for (let i = 0; i < uploadedFiles.length; i++) {
         const uploadedFile = uploadedFiles[i];
         
-        // Update overall progress
         setOverallProgress(Math.round((i / uploadedFiles.length) * 100));
         
-        // Upload video to storage
-        const videoUrl = await uploadToStorage(uploadedFile.file, i);
+        const videoUrl = await uploadToStorage(uploadedFile, i);
         
         if (!videoUrl) {
           toast.error(`שגיאה בהעלאת ${uploadedFile.file.name}`);
           continue;
         }
 
-        // Upload thumbnail if available
         let thumbnailUrl: string | null = null;
         if (uploadedFile.thumbnail) {
           thumbnailUrl = await uploadThumbnailToStorage(uploadedFile.thumbnail, user.id);
         }
 
-        // Save to database
+        // Get folder ID for this file
+        const folderId = uploadedFile.folderPath ? createdFolders.get(uploadedFile.folderPath) : null;
+
         const { error: dbError } = await supabase.from("videos").insert({
           user_id: user.id,
-          title: uploadedFiles.length === 1 ? title : `${title} - חלק ${i + 1}`,
-          description,
+          title: uploadedFile.file.name.replace(/\.[^/.]+$/, ""),
+          description: description || null,
           category,
           video_url: videoUrl,
           thumbnail_url: thumbnailUrl,
           duration_seconds: uploadedFile.duration || 0,
+          folder_id: folderId,
         });
 
         if (dbError) {
@@ -442,15 +610,16 @@ export const UploadSection = () => {
       }
 
       setOverallProgress(100);
+      setCurrentUploadingFile("");
 
       if (successCount > 0) {
-        toast.success(`${successCount} סרטונים הועלו בהצלחה!`);
+        toast.success(`${successCount} קבצים הועלו בהצלחה!`);
         
-        // Reset form
         setUploadedFiles([]);
         setTitle("");
         setDescription("");
         setCategory("כללי");
+        setExpandedFolders(new Set([""]));
       }
       
     } catch (error) {
@@ -459,14 +628,146 @@ export const UploadSection = () => {
     } finally {
       setIsUploading(false);
       setOverallProgress(0);
+      setCurrentUploadingFile("");
     }
   };
 
   const features = [
     { icon: Cloud, title: "סנכרון עם SharePoint", desc: "העלאה ישירה לאחסון הארגוני" },
-    { icon: Video, title: "תמיכה בכל הפורמטים", desc: "MP4, MOV, AVI, WebM ועוד" },
+    { icon: FolderOpen, title: "שמירת מבנה תיקיות", desc: "העלה תיקיות כמו שהן מסודרות" },
     { icon: CheckCircle2, title: "ללא הגבלת גודל", desc: "העלה קבצים בכל גודל" },
   ];
+
+  // Render folder tree recursively
+  const renderFolderTree = (node: FolderNode, depth: number = 0) => {
+    const hasChildren = node.files.length > 0 || node.subfolders.size > 0;
+    const isExpanded = expandedFolders.has(node.path);
+
+    const getStatusColor = () => {
+      switch (node.status) {
+        case "complete": return "text-primary";
+        case "uploading": return "text-blue-500";
+        case "error": return "text-destructive";
+        case "partial": return "text-yellow-500";
+        default: return "text-muted-foreground";
+      }
+    };
+
+    const getStatusIcon = () => {
+      switch (node.status) {
+        case "complete": return <CheckCircle2 className="w-4 h-4" />;
+        case "uploading": return <Loader2 className="w-4 h-4 animate-spin" />;
+        case "error": return <AlertCircle className="w-4 h-4" />;
+        default: return null;
+      }
+    };
+
+    return (
+      <div key={node.path || "root"} className="space-y-1">
+        {/* Folder header */}
+        {(node.path || hasSubfolders) && (
+          <div 
+            className={`flex items-center gap-2 p-2 rounded-lg cursor-pointer transition-colors hover:bg-secondary/50 ${depth > 0 ? 'mr-4' : ''}`}
+            onClick={() => toggleFolder(node.path)}
+            style={{ marginRight: depth * 16 }}
+          >
+            <div className="flex items-center gap-2 flex-1 min-w-0">
+              {hasChildren && (
+                isExpanded ? 
+                  <ChevronDown className="w-4 h-4 text-muted-foreground flex-shrink-0" /> : 
+                  <ChevronLeft className="w-4 h-4 text-muted-foreground flex-shrink-0" />
+              )}
+              <FolderOpen className={`w-5 h-5 flex-shrink-0 ${node.status === "complete" ? "text-primary" : "text-muted-foreground"}`} />
+              <span className="font-medium truncate">{node.name || "קבצים"}</span>
+              <span className="text-xs text-muted-foreground">
+                ({node.files.length + Array.from(node.subfolders.values()).reduce((sum, s) => sum + s.files.length, 0)})
+              </span>
+            </div>
+            
+            {/* Folder progress/status */}
+            <div className={`flex items-center gap-2 ${getStatusColor()}`}>
+              {node.status === "uploading" && (
+                <span className="text-xs">{node.progress}%</span>
+              )}
+              {getStatusIcon()}
+            </div>
+          </div>
+        )}
+
+        {/* Folder content */}
+        {isExpanded && (
+          <div className={depth > 0 ? "mr-4 border-r border-border pr-2" : ""} style={{ marginRight: depth * 16 }}>
+            {/* Subfolders */}
+            {Array.from(node.subfolders.values()).map(subfolder => renderFolderTree(subfolder, depth + 1))}
+            
+            {/* Files */}
+            {node.files.map((file) => (
+              <div 
+                key={file.relativePath}
+                className={`flex items-center gap-3 p-2 rounded-lg transition-colors ${
+                  currentUploadingFile === file.relativePath ? "bg-primary/10 border border-primary/30" : 
+                  file.status === "error" ? "bg-destructive/5" : "hover:bg-secondary/30"
+                }`}
+                style={{ marginRight: (depth + 1) * 16 }}
+              >
+                {/* File icon/thumbnail */}
+                <div className="relative w-10 h-10 rounded-lg overflow-hidden bg-secondary flex-shrink-0 flex items-center justify-center">
+                  {file.thumbnail ? (
+                    <img src={file.thumbnail} alt="" className="w-full h-full object-cover" />
+                  ) : (
+                    (() => {
+                      const IconComponent = getFileIcon(file.fileType);
+                      return <IconComponent className="w-5 h-5 text-muted-foreground" />;
+                    })()
+                  )}
+                </div>
+                
+                {/* File info */}
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium truncate">{file.file.name}</p>
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <span>{formatFileSize(file.file.size)}</span>
+                    {file.duration && file.duration > 0 && (
+                      <span>• {formatDuration(file.duration)}</span>
+                    )}
+                  </div>
+                  {file.status === "uploading" && (
+                    <Progress value={file.progress} className="mt-1 h-1" />
+                  )}
+                </div>
+                
+                {/* Status */}
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  {file.status === "complete" && (
+                    <CheckCircle2 className="w-5 h-5 text-primary" />
+                  )}
+                  {file.status === "uploading" && (
+                    <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                      <Loader2 className="w-4 h-4 animate-spin text-primary" />
+                      <span>{Math.round(file.progress)}%</span>
+                    </div>
+                  )}
+                  {file.status === "error" && (
+                    <AlertCircle className="w-5 h-5 text-destructive" />
+                  )}
+                  {(file.status === "pending" || file.status === "error") && !isUploading && (
+                    <Button 
+                      variant="ghost" 
+                      size="icon"
+                      className="h-8 w-8"
+                      onClick={(e) => { e.stopPropagation(); removeFile(file.relativePath); }}
+                    >
+                      <X className="w-4 h-4" />
+                    </Button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  };
 
   return (
     <section id="upload" className="py-20 bg-secondary/30">
@@ -478,7 +779,7 @@ export const UploadSection = () => {
               <span className="text-gradient">העלה תוכן חדש</span>
             </h2>
             <p className="text-muted-foreground max-w-2xl mx-auto">
-              גרור ושחרר קבצי וידאו או לחץ לבחירה - ללא הגבלת גודל
+              גרור ושחרר קבצים או תיקיות - מבנה התיקיות יישמר אוטומטית
             </p>
           </div>
 
@@ -487,7 +788,7 @@ export const UploadSection = () => {
             <div className="mb-6 p-4 rounded-xl bg-destructive/10 border border-destructive/30 flex items-center gap-3">
               <AlertCircle className="w-5 h-5 text-destructive" />
               <div className="flex-1">
-                <p className="text-sm text-foreground">יש להתחבר כדי להעלות סרטונים</p>
+                <p className="text-sm text-foreground">יש להתחבר כדי להעלות קבצים</p>
               </div>
               <Button variant="hero" size="sm" onClick={() => navigate("/auth")}>
                 התחבר עכשיו
@@ -517,15 +818,15 @@ export const UploadSection = () => {
               <div className="relative z-10">
                 {/* Upload Icon */}
                 <div className={`w-20 h-20 rounded-2xl mx-auto mb-6 flex items-center justify-center transition-all duration-300 ${isDragging ? 'gradient-primary glow-primary scale-110' : 'bg-secondary'}`}>
-                  <FileVideo className={`w-10 h-10 transition-colors ${isDragging ? 'text-primary-foreground' : 'text-primary'}`} />
+                  <FolderOpen className={`w-10 h-10 transition-colors ${isDragging ? 'text-primary-foreground' : 'text-primary'}`} />
                 </div>
 
                 {/* Text */}
                 <h3 className="text-xl font-semibold mb-2 text-foreground">
-                  {isDragging ? 'שחרר כאן להעלאה' : 'גרור קבצים לכאן'}
+                  {isDragging ? 'שחרר כאן להעלאה' : 'גרור קבצים או תיקיות לכאן'}
                 </h3>
                 <p className="text-muted-foreground mb-6">
-                  או לחץ לבחירת קבצים מהמחשב
+                  מבנה התיקיות יישמר אוטומטית
                 </p>
 
                 {/* Upload Buttons */}
@@ -565,114 +866,69 @@ export const UploadSection = () => {
 
                 {/* Supported Formats */}
                 <p className="text-sm text-muted-foreground mt-4">
-                  כל סוגי הקבצים נתמכים: וידאו, תמונות, מסמכים ועוד • ללא הגבלת גודל • גרור תיקייה להעלאה
+                  כל סוגי הקבצים נתמכים • ללא הגבלת גודל • מבנה תיקיות נשמר
                 </p>
               </div>
             </div>
 
             {/* Overall Progress */}
             {isUploading && (
-              <div className="p-4 rounded-xl bg-card border border-border">
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-sm font-medium">התקדמות כללית</span>
-                  <span className="text-sm text-muted-foreground">{overallProgress}%</span>
-                </div>
-                <Progress value={overallProgress} className="h-2" />
-              </div>
-            )}
-
-            {/* Uploaded Files List */}
-            {uploadedFiles.length > 0 && (
-              <div className="space-y-3">
-                <h4 className="font-semibold">קבצים שנבחרו ({uploadedFiles.length})</h4>
-                {uploadedFiles.map((file, index) => (
-                  <div 
-                    key={index} 
-                    className={`flex items-center gap-4 p-4 rounded-xl bg-card border transition-colors ${
-                      file.status === "error" ? "border-destructive/50" : "border-border"
-                    }`}
-                  >
-                    {/* Thumbnail / Icon */}
-                    <div className="relative w-24 h-16 rounded-lg overflow-hidden bg-secondary flex-shrink-0 flex items-center justify-center">
-                      {file.thumbnail ? (
-                        <img 
-                          src={file.thumbnail} 
-                          alt="תצוגה מקדימה"
-                          className="w-full h-full object-cover"
-                        />
-                      ) : file.fileType === "video" ? (
-                        <video 
-                          src={file.preview} 
-                          className="w-full h-full object-cover"
-                        />
-                      ) : (
-                        (() => {
-                          const IconComponent = getFileIcon(file.fileType);
-                          return <IconComponent className="w-8 h-8 text-muted-foreground" />;
-                        })()
-                      )}
-                      {file.duration && file.duration > 0 && (
-                        <div className="absolute bottom-1 right-1 px-1.5 py-0.5 rounded bg-background/80 text-xs">
-                          {formatDuration(file.duration)}
-                        </div>
-                      )}
+              <div className="p-6 rounded-xl bg-card border border-primary/30 shadow-lg">
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl gradient-primary flex items-center justify-center">
+                      <Loader2 className="w-5 h-5 text-primary-foreground animate-spin" />
                     </div>
-                    
-                    <div className="flex-1 min-w-0">
-                      <p className="font-medium truncate">{file.file.name}</p>
-                      <p className="text-sm text-muted-foreground">{formatFileSize(file.file.size)}</p>
-                      {file.status === "uploading" && (
-                        <Progress value={file.progress} className="mt-2 h-1" />
-                      )}
-                      {file.status === "error" && file.errorMessage && (
-                        <p className="text-sm text-destructive mt-1">{file.errorMessage}</p>
-                      )}
-                    </div>
-                    
-                    <div className="flex items-center gap-2">
-                      {file.status === "complete" && (
-                        <div className="flex items-center gap-1 text-sm text-primary">
-                          <CheckCircle2 className="w-5 h-5" />
-                          <span>הועלה</span>
-                        </div>
-                      )}
-                      {file.status === "uploading" && (
-                        <div className="flex items-center gap-1 text-sm text-muted-foreground">
-                          <Loader2 className="w-5 h-5 animate-spin text-primary" />
-                          <span>{Math.round(file.progress)}%</span>
-                        </div>
-                      )}
-                      {file.status === "error" && (
-                        <AlertCircle className="w-5 h-5 text-destructive" />
-                      )}
-                      {(file.status === "pending" || file.status === "error") && (
-                        <Button 
-                          variant="ghost" 
-                          size="icon" 
-                          onClick={() => removeFile(index)}
-                          disabled={isUploading}
-                        >
-                          <X className="w-4 h-4" />
-                        </Button>
-                      )}
+                    <div>
+                      <span className="font-semibold">מעלה קבצים...</span>
+                      <p className="text-sm text-muted-foreground truncate max-w-[300px]">
+                        {currentUploadingFile}
+                      </p>
                     </div>
                   </div>
-                ))}
+                  <div className="text-2xl font-bold text-primary">{overallProgress}%</div>
+                </div>
+                <Progress value={overallProgress} className="h-3" />
+                <div className="flex justify-between mt-2 text-xs text-muted-foreground">
+                  <span>{uploadedFiles.filter(f => f.status === "complete").length} / {uploadedFiles.length} קבצים</span>
+                  <span>{uploadedFiles.filter(f => f.status === "error").length > 0 && `${uploadedFiles.filter(f => f.status === "error").length} שגיאות`}</span>
+                </div>
               </div>
             )}
 
-            {/* Video Details Form */}
+            {/* Uploaded Files Tree */}
+            {uploadedFiles.length > 0 && (
+              <div className="rounded-xl bg-card border border-border p-4 space-y-2">
+                <div className="flex items-center justify-between mb-2">
+                  <h4 className="font-semibold">קבצים להעלאה ({uploadedFiles.length})</h4>
+                  {!isUploading && (
+                    <Button 
+                      variant="ghost" 
+                      size="sm"
+                      onClick={() => setUploadedFiles([])}
+                    >
+                      נקה הכל
+                    </Button>
+                  )}
+                </div>
+                <div className="max-h-[400px] overflow-y-auto">
+                  {renderFolderTree(folderTree)}
+                </div>
+              </div>
+            )}
+
+            {/* Details Form */}
             {uploadedFiles.length > 0 && (
               <div className="gradient-card rounded-xl border border-border p-6 space-y-4">
-                <h4 className="font-semibold mb-4">פרטי הסרטון</h4>
+                <h4 className="font-semibold mb-4">פרטי ההעלאה</h4>
                 
                 <div className="space-y-2">
-                  <Label htmlFor="title">כותרת *</Label>
+                  <Label htmlFor="title">שם ההעלאה *</Label>
                   <Input
                     id="title"
                     value={title}
                     onChange={(e) => setTitle(e.target.value)}
-                    placeholder="הזן כותרת לסרטון"
+                    placeholder="הזן שם להעלאה"
                     className="bg-secondary border-border"
                     disabled={isUploading}
                   />
@@ -684,8 +940,8 @@ export const UploadSection = () => {
                     id="description"
                     value={description}
                     onChange={(e) => setDescription(e.target.value)}
-                    placeholder="הוסף תיאור לסרטון..."
-                    className="bg-secondary border-border min-h-[100px]"
+                    placeholder="הוסף תיאור..."
+                    className="bg-secondary border-border min-h-[80px]"
                     disabled={isUploading}
                   />
                 </div>
@@ -719,7 +975,7 @@ export const UploadSection = () => {
                   ) : (
                     <>
                       <Upload className="w-5 h-5" />
-                      העלה {uploadedFiles.length} {uploadedFiles.length === 1 ? "סרטון" : "סרטונים"}
+                      העלה {uploadedFiles.length} קבצים
                     </>
                   )}
                 </Button>
