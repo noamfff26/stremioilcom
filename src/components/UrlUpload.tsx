@@ -381,8 +381,22 @@ export const UrlUpload = ({ onFileDownloaded, disabled }: UrlUploadProps) => {
   };
 
   const handleStreamVideo = (download: DownloadState) => {
+    // Check if format is browser-playable
+    const ext = download.fileName.split(".").pop()?.toLowerCase() || "";
+    const playableFormats = ["mp4", "webm", "ogg", "mov", "m4v"];
+    
+    if (!playableFormats.includes(ext)) {
+      toast.error(`הפורמט ${ext.toUpperCase()} לא נתמך להזרמה בדפדפן`, {
+        description: "פורמטים נתמכים: MP4, WebM, MOV. הורד את הקובץ או השתמש בנגן חיצוני.",
+        duration: 6000,
+      });
+      return;
+    }
+    
+    // Create streaming URL through proxy
+    const streamUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/stream-video?url=${encodeURIComponent(download.url)}`;
     setStreamingUrl({ 
-      url: download.url, 
+      url: streamUrl, 
       title: download.fileName 
     });
   };
