@@ -49,6 +49,8 @@ const defaultSubtitleConfig: SubtitleConfig = {
   outlineColor: "#000000",
   outlineWidth: 2,
   position: "bottom",
+  isBold: false,
+  isRTL: true,
 };
 
 export const VideoPlayer = ({ 
@@ -300,10 +302,11 @@ export const VideoPlayer = ({
       backgroundColor: subtitleConfig.backgroundColor,
       padding: "8px 16px",
       borderRadius: "4px",
-      direction: "rtl",
+      direction: subtitleConfig.isRTL ? "rtl" : "ltr",
       textAlign: "center",
       maxWidth: "80%",
       lineHeight: 1.4,
+      fontWeight: subtitleConfig.isBold ? "bold" : "normal",
     };
 
     if (subtitleConfig.textOutline) {
