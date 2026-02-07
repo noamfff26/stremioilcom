@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { Link2, Loader2, Download, X, CheckCircle2, AlertCircle, Youtube, Plus, FileVideo, FileImage, FileText, File, Play, ExternalLink, Copy } from "lucide-react";
+import { useState, useRef } from "react";
+import { Link2, Loader2, Download, X, CheckCircle2, AlertCircle, Youtube, Plus, FileVideo, FileImage, FileText, File, Play, ExternalLink, Copy, Subtitles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -10,6 +10,8 @@ import { VideoPlayer } from "./VideoPlayer";
 import {
   Dialog,
   DialogContent,
+  DialogHeader,
+  DialogTitle,
 } from "@/components/ui/dialog";
 import {
   DropdownMenu,
@@ -17,6 +19,12 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+
+interface SubtitleTrack {
+  label: string;
+  src: string;
+  language: string;
+}
 
 interface UrlUploadProps {
   onFileDownloaded: (file: File) => Promise<void>;
@@ -40,7 +48,9 @@ export const UrlUpload = ({ onFileDownloaded, disabled }: UrlUploadProps) => {
   const [isProcessing, setIsProcessing] = useState(false);
   const [showMultiInput, setShowMultiInput] = useState(false);
   const [multiUrlInput, setMultiUrlInput] = useState("");
-  const [streamingUrl, setStreamingUrl] = useState<{ url: string; title: string } | null>(null);
+  const [streamingUrl, setStreamingUrl] = useState<{ url: string; title: string; subtitles: SubtitleTrack[] } | null>(null);
+  const [pendingStream, setPendingStream] = useState<DownloadState | null>(null);
+  const subtitleInputRef = useRef<HTMLInputElement>(null);
 
   const VIDEO_EXTENSIONS = ["mp4", "webm", "mov", "avi", "mkv", "m4v", "flv", "wmv", "ts", "m3u8"];
 
@@ -386,13 +396,60 @@ export const UrlUpload = ({ onFileDownloaded, disabled }: UrlUploadProps) => {
     }
   };
 
-  const handleStreamVideo = (download: DownloadState) => {
+  const handleStreamVideo = (download: DownloadState, subtitles: SubtitleTrack[] = []) => {
     // Create streaming URL through proxy
     const streamUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/stream-video?url=${encodeURIComponent(download.url)}`;
     setStreamingUrl({ 
       url: streamUrl, 
-      title: download.fileName 
+      title: download.fileName,
+      subtitles
     });
+    setPendingStream(null);
+  };
+
+  const handleStreamWithSubtitles = (download: DownloadState) => {
+    setPendingStream(download);
+  };
+
+  const handleSubtitleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0 || !pendingStream) return;
+
+    const subtitles: SubtitleTrack[] = [];
+    
+    for (const file of Array.from(files)) {
+      const ext = file.name.split('.').pop()?.toLowerCase();
+      if (ext !== 'srt' && ext !== 'vtt') {
+        toast.error(`פורמט לא נתמך: ${file.name}. השתמש ב-SRT או VTT`);
+        continue;
+      }
+
+      // Create a blob URL for the subtitle file
+      const blobUrl = URL.createObjectURL(file);
+      const label = file.name.replace(/\.(srt|vtt)$/i, '');
+      
+      subtitles.push({
+        label,
+        src: blobUrl,
+        language: 'he' // Default to Hebrew
+      });
+    }
+
+    if (subtitles.length > 0) {
+      handleStreamVideo(pendingStream, subtitles);
+      toast.success(`נטענו ${subtitles.length} קבצי כתוביות`);
+    }
+    
+    // Reset the input
+    if (subtitleInputRef.current) {
+      subtitleInputRef.current.value = '';
+    }
+  };
+
+  const handleStreamWithoutSubtitles = () => {
+    if (pendingStream) {
+      handleStreamVideo(pendingStream, []);
+    }
   };
 
   const handleOpenInNewTab = (download: DownloadState) => {
@@ -541,15 +598,28 @@ export const UrlUpload = ({ onFileDownloaded, disabled }: UrlUploadProps) => {
                 {download.status === "complete" && download.isVideo && (
                   <>
                     {isPlayableInBrowser(download.fileName) ? (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleStreamVideo(download)}
-                        className="text-primary"
-                      >
-                        <Play className="w-4 h-4 ml-1" />
-                        צפה
-                      </Button>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="text-primary"
+                          >
+                            <Play className="w-4 h-4 ml-1" />
+                            צפה
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem onClick={() => handleStreamVideo(download)}>
+                            <Play className="w-4 h-4 ml-2" />
+                            נגן עכשיו
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => handleStreamWithSubtitles(download)}>
+                            <Subtitles className="w-4 h-4 ml-2" />
+                            נגן עם כתוביות
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
                     ) : (
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
@@ -566,6 +636,10 @@ export const UrlUpload = ({ onFileDownloaded, disabled }: UrlUploadProps) => {
                           <DropdownMenuItem onClick={() => handleStreamVideo(download)}>
                             <Play className="w-4 h-4 ml-2" />
                             נסה לנגן בדפדפן
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => handleStreamWithSubtitles(download)}>
+                            <Subtitles className="w-4 h-4 ml-2" />
+                            נגן עם כתוביות
                           </DropdownMenuItem>
                           <DropdownMenuItem onClick={() => handleOpenInNewTab(download)}>
                             <ExternalLink className="w-4 h-4 ml-2" />
@@ -619,11 +693,59 @@ export const UrlUpload = ({ onFileDownloaded, disabled }: UrlUploadProps) => {
           <VideoPlayer
             src={streamingUrl.url}
             title={streamingUrl.title}
+            subtitles={streamingUrl.subtitles}
             onClose={() => setStreamingUrl(null)}
           />
         )}
       </DialogContent>
     </Dialog>
+
+    {/* Subtitle Upload Dialog */}
+    <Dialog open={!!pendingStream} onOpenChange={() => setPendingStream(null)}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Subtitles className="w-5 h-5" />
+            העלאת כתוביות
+          </DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4">
+          <p className="text-sm text-muted-foreground">
+            בחר קבצי כתוביות (SRT או VTT) להצגה בזמן הצפייה
+          </p>
+          
+          <input
+            ref={subtitleInputRef}
+            type="file"
+            accept=".srt,.vtt"
+            multiple
+            onChange={handleSubtitleUpload}
+            className="hidden"
+          />
+          
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              className="flex-1"
+              onClick={() => subtitleInputRef.current?.click()}
+            >
+              <Subtitles className="w-4 h-4 ml-2" />
+              בחר קבצי כתוביות
+            </Button>
+            <Button
+              variant="hero"
+              className="flex-1"
+              onClick={handleStreamWithoutSubtitles}
+            >
+              <Play className="w-4 h-4 ml-2" />
+              נגן בלי כתוביות
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+
+    {/* Hidden file input for subtitle uploads */}
     </>
   );
 };
