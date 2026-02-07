@@ -21,6 +21,8 @@ export interface SubtitleConfig {
   outlineColor: string;
   outlineWidth: number;
   position: "top" | "middle" | "bottom";
+  isBold: boolean;
+  isRTL: boolean;
 }
 
 interface SubtitleTrack {
@@ -250,6 +252,31 @@ export const SubtitleSettings = ({
               )}
             </div>
 
+            {/* Bold & RTL */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Type className="w-4 h-4 text-primary" />
+                  <Label>טקסט מודגש (Bold)</Label>
+                </div>
+                <Switch
+                  checked={config.isBold}
+                  onCheckedChange={(v) => updateConfig({ isBold: v })}
+                />
+              </div>
+              
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Type className="w-4 h-4 text-primary" />
+                  <Label>כיוון עברית (RTL)</Label>
+                </div>
+                <Switch
+                  checked={config.isRTL}
+                  onCheckedChange={(v) => updateConfig({ isRTL: v })}
+                />
+              </div>
+            </div>
+
             {/* Position */}
             <div className="space-y-2">
               <div className="flex items-center gap-2">
@@ -282,6 +309,7 @@ export const SubtitleSettings = ({
               <p className="text-center text-sm text-muted-foreground mb-2">תצוגה מקדימה:</p>
               <p
                 className="text-center"
+                dir={config.isRTL ? "rtl" : "ltr"}
                 style={{
                   fontSize: `${Math.min(config.fontSize, 24)}px`,
                   fontFamily: config.fontFamily,
@@ -289,6 +317,7 @@ export const SubtitleSettings = ({
                   backgroundColor: config.backgroundColor,
                   padding: "4px 8px",
                   borderRadius: "4px",
+                  fontWeight: config.isBold ? "bold" : "normal",
                   textShadow: config.textOutline
                     ? `
                       -${config.outlineWidth}px -${config.outlineWidth}px 0 ${config.outlineColor},
