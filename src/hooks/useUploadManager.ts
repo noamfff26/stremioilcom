@@ -109,34 +109,59 @@ export const useUploadManager = (userId: string | undefined) => {
   };
 
   const addFiles = useCallback(async (filesWithPaths: { file: File; path: string }[]) => {
-    const newFiles: UploadedFile[] = [];
-    
-    for (const { file, path } of filesWithPaths) {
+    // Create files immediately without thumbnails for instant feedback
+    const newFiles: UploadedFile[] = filesWithPaths.map(({ file, path }) => {
       const preview = URL.createObjectURL(file);
       const fileType = getFileType(file);
-      const { thumbnail, duration } = await generateThumbnail(file);
       const relativePath = path ? `${path}/${file.name}` : file.name;
       
-      newFiles.push({
+      return {
         id: generateId(),
         file,
         preview,
-        thumbnail,
+        thumbnail: null,
         progress: 0,
-        status: "pending",
-        duration,
+        status: "pending" as const,
+        duration: 0,
         fileType,
         relativePath,
         folderPath: path,
         uploadedBytes: 0,
         totalBytes: file.size,
-      });
-    }
+      };
+    });
     
+    // Add files immediately
     setState(prev => ({
       ...prev,
       files: [...prev.files, ...newFiles],
     }));
+
+    // Generate thumbnails in background (batched for performance)
+    const BATCH_SIZE = 10;
+    for (let i = 0; i < newFiles.length; i += BATCH_SIZE) {
+      const batch = newFiles.slice(i, i + BATCH_SIZE);
+      
+      // Process batch in parallel
+      const thumbnailPromises = batch.map(async (uploadedFile) => {
+        const { thumbnail, duration } = await generateThumbnail(uploadedFile.file);
+        return { id: uploadedFile.id, thumbnail, duration };
+      });
+
+      const results = await Promise.all(thumbnailPromises);
+
+      // Update state with thumbnails
+      setState(prev => ({
+        ...prev,
+        files: prev.files.map(f => {
+          const result = results.find(r => r.id === f.id);
+          if (result) {
+            return { ...f, thumbnail: result.thumbnail, duration: result.duration };
+          }
+          return f;
+        }),
+      }));
+    }
     
     return newFiles;
   }, []);
