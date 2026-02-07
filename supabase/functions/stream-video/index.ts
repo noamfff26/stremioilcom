@@ -14,6 +14,46 @@ const browserHeaders = {
   'Connection': 'keep-alive',
 };
 
+// Get correct MIME type for video files
+function getVideoMimeType(url: string, serverContentType: string): string {
+  // Extract filename from URL
+  const pathname = new URL(url).pathname;
+  const ext = pathname.split('.').pop()?.toLowerCase() || '';
+  
+  const mimeTypes: Record<string, string> = {
+    'mp4': 'video/mp4',
+    'webm': 'video/webm',
+    'mkv': 'video/x-matroska',
+    'avi': 'video/x-msvideo',
+    'mov': 'video/quicktime',
+    'm4v': 'video/x-m4v',
+    'ts': 'video/mp2t',
+    'flv': 'video/x-flv',
+    'wmv': 'video/x-ms-wmv',
+    'ogv': 'video/ogg',
+    'm3u8': 'application/vnd.apple.mpegurl',
+  };
+
+  // If server returns a non-video content type, try to determine from extension
+  if (serverContentType.includes('force-download') || 
+      serverContentType.includes('octet-stream') ||
+      !serverContentType.startsWith('video/')) {
+    const detectedType = mimeTypes[ext];
+    if (detectedType) {
+      console.log(`Overriding Content-Type from "${serverContentType}" to "${detectedType}" based on extension .${ext}`);
+      return detectedType;
+    }
+  }
+
+  // Return server's content type if it's already a video type
+  if (serverContentType.startsWith('video/')) {
+    return serverContentType;
+  }
+
+  // Default to mp4
+  return 'video/mp4';
+}
+
 serve(async (req) => {
   // Handle CORS preflight requests
   if (req.method === 'OPTIONS') {
@@ -70,13 +110,14 @@ serve(async (req) => {
       );
     }
 
-    // Get content info
-    const contentType = response.headers.get('content-type') || 'video/mp4';
+    // Get content info and fix content type
+    const serverContentType = response.headers.get('content-type') || 'application/octet-stream';
+    const contentType = getVideoMimeType(url, serverContentType);
     const contentLength = response.headers.get('content-length');
     const contentRange = response.headers.get('content-range');
     const acceptRanges = response.headers.get('accept-ranges') || 'bytes';
 
-    console.log(`Response status: ${response.status}, Content-Type: ${contentType}, Content-Length: ${contentLength}`);
+    console.log(`Response status: ${response.status}, Original Content-Type: ${serverContentType}, Using: ${contentType}, Content-Length: ${contentLength}`);
 
     // Build response headers
     const responseHeaders = new Headers({
