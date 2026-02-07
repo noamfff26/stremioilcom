@@ -206,12 +206,15 @@ export const UrlUpload = ({ onFileDownloaded, disabled }: UrlUploadProps) => {
     const type = detectUrlType(finalUrl);
     const id = `${Date.now()}-${Math.random().toString(36).substring(7)}`;
     
-    // For YouTube/Vimeo, show not supported message
+    // For YouTube/Vimeo, show helpful message with alternatives
     if (type === "youtube" || type === "vimeo") {
       const platformName = type === "youtube" ? "YouTube" : "Vimeo";
-      toast.error(
-        `הורדה מ-${platformName} אינה נתמכת כרגע עקב הגבלות הפלטפורמה. נסה להשתמש בקישור ישיר לקובץ.`,
-        { duration: 5000 }
+      toast.info(
+        `הורדה מ-${platformName} אינה נתמכת עקב מגבלות זכויות יוצרים. טיפ: השתמש בשירות חיצוני כמו y2mate.com להורדה, ואז העלה את הקובץ ישירות.`,
+        { 
+          duration: 8000,
+          icon: type === "youtube" ? <Youtube className="w-5 h-5 text-red-500" /> : undefined
+        }
       );
       return;
     }
