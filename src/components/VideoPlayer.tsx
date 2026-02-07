@@ -208,6 +208,9 @@ export const VideoPlayer = ({
     const video = videoRef.current;
     if (!video) return;
 
+    // Initialize volume
+    video.volume = volume;
+
     const handleTimeUpdate = () => setCurrentTime(video.currentTime);
     const handleLoadedMetadata = () => setDuration(video.duration);
     const handleEnded = () => setIsPlaying(false);
@@ -351,6 +354,7 @@ export const VideoPlayer = ({
         poster={thumbnail}
         className="w-full h-full object-contain"
         onClick={togglePlay}
+        playsInline
       />
 
       {/* Subtitles Display */}
