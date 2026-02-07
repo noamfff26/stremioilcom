@@ -1,5 +1,5 @@
-import { useState, useEffect } from "react";
-import { X, Type, Palette, Move, Eye, Save, Star, Trash2 } from "lucide-react";
+import { useState, useEffect, useRef } from "react";
+import { X, Type, Palette, Move, Eye, Save, Star, Trash2, Upload, FileText } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
 import { Label } from "@/components/ui/label";
@@ -49,6 +49,7 @@ interface SubtitleSettingsProps {
   activeTrack: string | null;
   onTrackChange: (src: string | null) => void;
   onClose: () => void;
+  onAddSubtitle?: (track: SubtitleTrack) => void;
 }
 
 const fonts = [
@@ -84,12 +85,44 @@ export const SubtitleSettings = ({
   activeTrack,
   onTrackChange,
   onClose,
+  onAddSubtitle,
 }: SubtitleSettingsProps) => {
   const { user } = useAuth();
   const [activeTab, setActiveTab] = useState<"tracks" | "style" | "profiles">("tracks");
   const [profiles, setProfiles] = useState<SubtitleProfile[]>([]);
   const [newProfileName, setNewProfileName] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const subtitleInputRef = useRef<HTMLInputElement>(null);
+
+  const handleSubtitleUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0 || !onAddSubtitle) return;
+
+    for (const file of Array.from(files)) {
+      const ext = file.name.split('.').pop()?.toLowerCase();
+      if (ext !== 'srt' && ext !== 'vtt') {
+        toast.error(`פורמט לא נתמך: ${file.name}. השתמש ב-SRT או VTT`);
+        continue;
+      }
+
+      const blobUrl = URL.createObjectURL(file);
+      const label = file.name.replace(/\.(srt|vtt)$/i, '');
+      
+      onAddSubtitle({
+        label,
+        src: blobUrl,
+        language: 'he'
+      });
+      
+      // Automatically activate the newly added subtitle
+      onTrackChange(blobUrl);
+      toast.success(`כתוביות נטענו: ${label}`);
+    }
+    
+    if (subtitleInputRef.current) {
+      subtitleInputRef.current.value = '';
+    }
+  };
 
   // Fetch profiles on mount
   useEffect(() => {
@@ -243,34 +276,61 @@ export const SubtitleSettings = ({
       <div className="p-4 space-y-4">
         {activeTab === "tracks" ? (
           /* Track Selection */
-          <div className="space-y-2">
-            <button
-              className={`w-full p-3 rounded-lg text-right transition-colors ${
-                !activeTrack ? "bg-primary/20 border border-primary" : "bg-secondary hover:bg-secondary/80"
-              }`}
-              onClick={() => onTrackChange(null)}
-            >
-              <span className="font-medium">ללא כתוביות</span>
-            </button>
-            
-            {subtitles.length > 0 ? (
-              subtitles.map((track) => (
-                <button
-                  key={track.src}
-                  className={`w-full p-3 rounded-lg text-right transition-colors ${
-                    activeTrack === track.src ? "bg-primary/20 border border-primary" : "bg-secondary hover:bg-secondary/80"
-                  }`}
-                  onClick={() => onTrackChange(track.src)}
+          <div className="space-y-3">
+            {/* Upload Subtitle Button */}
+            {onAddSubtitle && (
+              <>
+                <input
+                  ref={subtitleInputRef}
+                  type="file"
+                  accept=".srt,.vtt"
+                  multiple
+                  onChange={handleSubtitleUpload}
+                  className="hidden"
+                />
+                <Button
+                  variant="outline"
+                  className="w-full"
+                  onClick={() => subtitleInputRef.current?.click()}
                 >
-                  <span className="font-medium">{track.label}</span>
-                  <span className="text-xs text-muted-foreground block">{track.language}</span>
-                </button>
-              ))
-            ) : (
-              <p className="text-sm text-muted-foreground text-center py-4">
-                אין כתוביות זמינות לסרטון זה
-              </p>
+                  <Upload className="w-4 h-4 ml-2" />
+                  העלה קובץ כתוביות (SRT/VTT)
+                </Button>
+              </>
             )}
+
+            <div className="border-t border-border pt-3 space-y-2">
+              <button
+                className={`w-full p-3 rounded-lg text-right transition-colors ${
+                  !activeTrack ? "bg-primary/20 border border-primary" : "bg-secondary hover:bg-secondary/80"
+                }`}
+                onClick={() => onTrackChange(null)}
+              >
+                <span className="font-medium">ללא כתוביות</span>
+              </button>
+              
+              {subtitles.length > 0 ? (
+                subtitles.map((track) => (
+                  <button
+                    key={track.src}
+                    className={`w-full p-3 rounded-lg text-right transition-colors flex items-center gap-2 ${
+                      activeTrack === track.src ? "bg-primary/20 border border-primary" : "bg-secondary hover:bg-secondary/80"
+                    }`}
+                    onClick={() => onTrackChange(track.src)}
+                  >
+                    <FileText className="w-4 h-4 text-primary flex-shrink-0" />
+                    <div className="flex-1 text-right">
+                      <span className="font-medium block">{track.label}</span>
+                      <span className="text-xs text-muted-foreground">{track.language}</span>
+                    </div>
+                  </button>
+                ))
+              ) : (
+                <p className="text-sm text-muted-foreground text-center py-2">
+                  העלה קובץ כתוביות לצפייה עם תרגום
+                </p>
+              )}
+            </div>
           </div>
         ) : activeTab === "style" ? (
           /* Style Settings */

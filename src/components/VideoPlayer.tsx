@@ -58,7 +58,7 @@ export const VideoPlayer = ({
   title, 
   thumbnail, 
   videoId,
-  subtitles = [],
+  subtitles: initialSubtitles = [],
   onClose 
 }: VideoPlayerProps) => {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -78,9 +78,15 @@ export const VideoPlayer = ({
   const [activeSubtitleTrack, setActiveSubtitleTrack] = useState<string | null>(null);
   const [parsedCues, setParsedCues] = useState<SubtitleCue[]>([]);
   const [currentCue, setCurrentCue] = useState<string>("");
+  const [subtitles, setSubtitles] = useState<SubtitleTrack[]>(initialSubtitles);
 
   // Share state
   const [showShareModal, setShowShareModal] = useState(false);
+
+  // Handle adding new subtitles from within the player
+  const handleAddSubtitle = (track: SubtitleTrack) => {
+    setSubtitles(prev => [...prev, track]);
+  };
 
   // Load saved subtitle config
   useEffect(() => {
@@ -471,6 +477,7 @@ export const VideoPlayer = ({
           activeTrack={activeSubtitleTrack}
           onTrackChange={setActiveSubtitleTrack}
           onClose={() => setShowSubtitleSettings(false)}
+          onAddSubtitle={handleAddSubtitle}
         />
       )}
 
