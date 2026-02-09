@@ -134,7 +134,7 @@ export const UploadSection = () => {
     });
   };
 
-  const hasSubfolders = uploadedFiles.some(f => f.folderPath.length > 0);
+  const hasSubfolders = uploadedFiles.some(f => f.folderPath.length > 0); const hideSingleFileProgress = isUploading && uploadedFiles.length === 1;
 
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
@@ -418,7 +418,7 @@ export const UploadSection = () => {
                       <span className="text-accent">• מושהה</span>
                     )}
                   </div>
-                  {(file.status === "uploading" || file.status === "paused") && (
+                  {!hideSingleFileProgress && (file.status === "uploading" || file.status === "paused") && (
                     <Progress value={file.progress} className="mt-1 h-1" />
                   )}
                 </div>
@@ -430,7 +430,7 @@ export const UploadSection = () => {
                   {file.status === "uploading" && (
                     <div className="flex items-center gap-1 text-xs text-muted-foreground">
                       <Loader2 className="w-4 h-4 animate-spin text-primary" />
-                      <span>{Math.round(file.progress)}%</span>
+                      {!hideSingleFileProgress && <span>{Math.round(file.progress)}%</span>}
                     </div>
                   )}
                   {file.status === "paused" && (
@@ -580,11 +580,11 @@ export const UploadSection = () => {
                     </div>
                     <div>
                       <span className="font-semibold">
-                        {isPaused ? "ההעלאה מושהית" : "מעלה קבצים..."}
+                        {isPaused ? "ההעלאה מושהית" : uploadedFiles.length === 1 ? "מעלה קובץ..." : `מעלה ${uploadedFiles.length} קבצים...`}
                       </span>
-                      <p className="text-sm text-muted-foreground truncate max-w-[300px]">
-                        {currentUploadingFile}
-                      </p>
+                      {uploadedFiles.length > 1 && currentUploadingFile && (
+                        <p className="text-sm text-muted-foreground truncate max-w-[300px]">{currentUploadingFile}</p>
+                      )}
                     </div>
                   </div>
                   <div className="flex items-center gap-3">
