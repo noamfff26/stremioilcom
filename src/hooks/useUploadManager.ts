@@ -72,10 +72,10 @@ export const useUploadManager = (userId: string | undefined) => {
         return;
       }
       
-      if (fileType !== "video") {
-        resolve({ thumbnail: "", duration: 0 });
-        return;
-      }
+      if (fileType !== "video") { resolve({ thumbnail: "", duration: 0 }); return; }
+      const ext = file.name.split(".").pop()?.toLowerCase();
+      if (file.size > 512 * 1024 * 1024 || ext === "mkv" || ext === "avi") { resolve({ thumbnail: "", duration: 0 }); return; }
+      
       
       const video = document.createElement("video");
       const canvas = document.createElement("canvas");
@@ -138,30 +138,31 @@ export const useUploadManager = (userId: string | undefined) => {
     }));
 
     // Generate thumbnails in background (batched for performance)
-    const BATCH_SIZE = 10;
-    for (let i = 0; i < newFiles.length; i += BATCH_SIZE) {
-      const batch = newFiles.slice(i, i + BATCH_SIZE);
-      
-      // Process batch in parallel
-      const thumbnailPromises = batch.map(async (uploadedFile) => {
-        const { thumbnail, duration } = await generateThumbnail(uploadedFile.file);
-        return { id: uploadedFile.id, thumbnail, duration };
-      });
+    void (async () => {
+      const BATCH_SIZE = 6;
+      for (let i = 0; i < newFiles.length; i += BATCH_SIZE) {
+        const batch = newFiles.slice(i, i + BATCH_SIZE);
+        
+        // Process batch in parallel
+        const thumbnailPromises = batch.map(async (uploadedFile) => {
+          const { thumbnail, duration } = await generateThumbnail(uploadedFile.file);
+          return { id: uploadedFile.id, thumbnail, duration };
+        });
 
-      const results = await Promise.all(thumbnailPromises);
+        const results = await Promise.all(thumbnailPromises);
 
-      // Update state with thumbnails
-      setState(prev => ({
-        ...prev,
-        files: prev.files.map(f => {
-          const result = results.find(r => r.id === f.id);
-          if (result) {
-            return { ...f, thumbnail: result.thumbnail, duration: result.duration };
-          }
-          return f;
-        }),
-      }));
-    }
+        // Update state with thumbnails
+        setState(prev => ({
+          ...prev,
+          files: prev.files.map(f => {
+            const result = results.find(r => r.id === f.id);
+            if (result) return { ...f, thumbnail: result.thumbnail, duration: result.duration };
+            return f;
+          }),
+        }));
+      }
+    })();
+    
     
     return newFiles;
   }, []);
@@ -169,35 +170,26 @@ export const useUploadManager = (userId: string | undefined) => {
   const removeFile = useCallback((fileId: string) => {
     setState(prev => {
       const fileToRemove = prev.files.find(f => f.id === fileId);
-      if (fileToRemove) {
-        URL.revokeObjectURL(fileToRemove.preview);
-      }
-      return {
-        ...prev,
-        files: prev.files.filter(f => f.id !== fileId),
-      };
+      if (fileToRemove) URL.revokeObjectURL(fileToRemove.preview);
+      const files = prev.files.filter(f => f.id !== fileId);
+      const overallProgress = files.length ? Math.round(files.reduce((sum, f) => sum + f.progress, 0) / files.length) : 0;
+      return { ...prev, files, overallProgress };
     });
   }, []);
 
   const clearFiles = useCallback(() => {
     setState(prev => {
       prev.files.forEach(f => URL.revokeObjectURL(f.preview));
-      return {
-        ...prev,
-        files: [],
-      };
+      return { ...prev, files: [], overallProgress: 0, currentUploadingFile: "" };
     });
   }, []);
 
   const updateFileProgress = useCallback((fileId: string, progress: number, status?: UploadedFile["status"]) => {
-    setState(prev => ({
-      ...prev,
-      files: prev.files.map(f => 
-        f.id === fileId 
-          ? { ...f, progress, ...(status && { status }) }
-          : f
-      ),
-    }));
+    setState(prev => {
+      const files = prev.files.map(f => (f.id === fileId ? { ...f, progress, ...(status && { status }) } : f));
+      const overallProgress = files.length ? Math.round(files.reduce((sum, f) => sum + f.progress, 0) / files.length) : 0;
+      return { ...prev, files, overallProgress };
+    });
   }, []);
 
   const updateFileStatus = useCallback((fileId: string, status: UploadedFile["status"], errorMessage?: string) => {
@@ -438,10 +430,9 @@ export const useUploadManager = (userId: string | undefined) => {
           continue;
         }
         
-        setState(prev => ({
-          ...prev,
-          overallProgress: Math.round((i / filesToUpload.length) * 100),
-        }));
+        // overallProgress is derived from per-file progress (updateFileProgress)
+        // so we don't need to update it here.
+        // 
         
         const videoUrl = await uploadFileChunked(uploadedFile);
         
