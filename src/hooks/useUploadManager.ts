@@ -221,6 +221,11 @@ export const useUploadManager = (userId: string | undefined) => {
     updateFileProgress(uploadedFile.id, 5);
 
     try {
+      // Get auth token before starting XHR
+      const projectUrl = import.meta.env.VITE_SUPABASE_URL;
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token || import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+
       // Use XMLHttpRequest for progress tracking
       const result = await new Promise<string | null>((resolve, reject) => {
         const xhr = new XMLHttpRequest();
@@ -257,12 +262,8 @@ export const useUploadManager = (userId: string | undefined) => {
           resolve(null);
         });
 
-        // Get upload URL
-        const projectUrl = import.meta.env.VITE_SUPABASE_URL;
-        const anonKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
-        
         xhr.open("POST", `${projectUrl}/storage/v1/object/videos/${fileName}`);
-        xhr.setRequestHeader("Authorization", `Bearer ${anonKey}`);
+        xhr.setRequestHeader("Authorization", `Bearer ${token}`);
         xhr.setRequestHeader("x-upsert", "false");
         
         xhr.send(uploadedFile.file);
