@@ -262,8 +262,10 @@ export const useUploadManager = (userId: string | undefined) => {
           resolve(null);
         });
 
+        const anonKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
         xhr.open("POST", `${projectUrl}/storage/v1/object/videos/${fileName}`);
         xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+        xhr.setRequestHeader("apikey", anonKey);
         xhr.setRequestHeader("x-upsert", "false");
         
         xhr.send(uploadedFile.file);
