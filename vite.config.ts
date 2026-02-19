@@ -30,7 +30,7 @@ export default defineConfig(({ mode }) => ({
         orientation: "portrait",
         dir: "rtl",
         lang: "he",
-        start_url: "/",
+        start_url: "./",
         icons: [
           {
             src: "/favicon.jpg",
